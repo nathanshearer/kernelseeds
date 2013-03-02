@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #----------------------------------------------------------------------------
-# allmod.sh
+# allmodconfig.sh
 # Copyright (C) 2013 Nathan Shearer
 #
 # This program is free software; you can redistribute it and/or modify it
@@ -22,59 +22,10 @@
 #   02110-1301
 #   USA
 
-NAME="allmod"
-CODENAME="allmod"
+NAME="allmodconfig"
+CODENAME="allmodconfig"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 VERSION="1.0.0.0"
-
-# \brief Concatenates all the CONFIG=m kernel options to $1 and writes to $2
-# \param $1 The path to the config file that is modified
-# \param $2 The output file
-function allmod_enable_all_modules
-{
-	cp "$1" "$TMP/original+allmodconfig"
-	local IFS=$'\n'
-	for CONFIGMOD in `cat "$TMP/allmodconfig"`; do
-		CONFIG=`echo $CONFIGMOD | sed -r -e 's/=.+//'`
-		if echo "$CONFIGMOD" | grep -q "=m"; then
-			# do not override original options
-			if grep -q $CONFIG "$1"; then
-				continue
-			fi
-			echo "$CONFIGMOD" >> "$TMP/original+allmodconfig"
-		fi
-	done
-	mv "$TMP/original+allmodconfig" "$2"
-}
-
-function allmod_enable_builtin
-{
-	local IFS=$'\n'
-	for ALLMODCONFIG in `cat "$TMP/allmodconfig"`; do
-		CONFIG=`echo $ALLMODCONFIG | sed -r -e 's/=.+//'`
-		echo $ALLMODCONFIG
-		if echo "$ALLMODCONFIG" | grep -q "=y"; then
-			allmod_count_new_modules "$TMP/original" $CONFIG
-		fi
-	done
-}
-
-function allmod_count_modules
-{
-	grep "=m" "$1" | wc -l
-}
-
-# \brief Given a config file and a CONFIG=y kernel option, print how many new modules are available
-# \param $1 Config file
-# \param $2 CONFIG=y kernel option
-function allmod_count_new_modules
-{
-	cp "$1" .config
-	echo "$2" >> .config
-	cat "$TMP/allmodules" >> .config
-	make olddefconfig >/dev/null 2>/dev/null
-	allmod_count_modules .config
-}
 
 # \brief Ensures dependencies are present
 # \param $@ The dependencies to check for
