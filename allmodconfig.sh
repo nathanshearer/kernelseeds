@@ -72,7 +72,7 @@ function shearer_exit
 	fi
 	case $EXIT in
 		0) exit;;
-		*) echo "$CODENAME: $MESSAGE.\n" >&2; exit $EXIT;;
+		*) echo "$CODENAME: $MESSAGE" >&2; exit $EXIT;;
 	esac
 }
 
@@ -149,6 +149,10 @@ renice $NICE $$ >>"$LOG" 2>>"$LOG"
 #------------------------------------------------------------------------------
 # begin execution
 
+if [ ! -e "$CONFIG" ]; then
+	shearer_exit 1 "Could not find a config file at \"$CONFIG\""
+fi
+
 grep ^CONFIG "$CONFIG" > "$TMP/original"
 make mrproper >/dev/null 2>/dev/null
 make allmodconfig >/dev/null 2>/dev/null
@@ -188,3 +192,59 @@ for FULLCONFIG in `cat "$TMP/allmodules"`; do
 	echo "Setting $FULLCONFIG"
 	echo "$FULLCONFIG" >> .config
 done
+
+# gentoo requirements
+echo CONFIG_DEVTMPFS=y >> .config
+echo CONFIG_DEVTMPFS_MOUNT=y >> .config
+
+# boolean menu options
+echo CONFIG_SCSI_LOWLEVEL_PCMCIA=y >> .config
+echo CONFIG_FUSION=y >> .config
+echo CONFIG_WL_TI=y >> .config
+echo CONFIG_WAN=y >> .config
+echo CONFIG_ISDN=y >> .config
+echo CONFIG_CAPI_AVM=y >> .config
+echo CONFIG_CAPI_EICON=y >> .config
+echo CONFIG_SPI=y >> .config
+echo CONFIG_RC_DEVICES=y >> .config
+echo CONFIG_MEDIA_PARPORT_SUPPORT=y >> .config
+echo CONFIG_ACCESSIBILITY=y >> .config
+echo CONFIG_AUXDISPLAY=y >> .config
+echo CONFIG_PM_DEVFREQ=y >> .config
+echo CONFIG_EXTCON=y >> .config
+
+# staging
+echo CONFIG_STAGING=y >> .config
+echo CONFIG_COMEDI_MISC_DRIVERS=y >> .config
+echo CONFIG_COMEDI_PCI_DRIVERS=y >> .config
+echo CONFIG_COMEDI_PCMCIA_DRIVERS=y >> .config
+echo CONFIG_COMEDI_USB_DRIVERS=y >> .config
+echo CONFIG_STAGING_MEDIA=y >> .config
+echo CONFIG_LIRC_STAGING=y >> .config
+echo CONFIG_ANDROID=y >> .config
+
+# bluetooth
+echo CONFIG_BT_RFCOMM_TTY=y >> .config
+echo CONFIG_BT_BNEP_MC_FILTER=y >> .config
+echo CONFIG_BT_BNEP_PROTO_FILTER=y >> .config
+echo CONFIG_BT_HCIUART_H4=y >> .config
+echo CONFIG_BT_HCIUART_BCSP=y >> .config
+echo CONFIG_BT_HCIUART_ATH3K=y >> .config
+echo CONFIG_BT_HCIUART_LL=y >> .config
+echo CONFIG_BT_HCIUART_3WIRE=y >> .config
+
+# ext2
+echo CONFIG_EXT2_FS_XATTR=y >> .config
+echo CONFIG_EXT2_FS_POSIX_ACL=y >> .config
+echo CONFIG_EXT2_FS_SECURITY=y >> .config
+echo CONFIG_EXT2_FS_XIP=y >> .config
+
+# ext3
+echo CONFIG_EXT3_FS_POSIX_ACL=y >> .config
+echo CONFIG_EXT3_FS_SECURITY=y >> .config
+
+# xfs
+echo CONFIG_XFS_QUOTA=y >> .config
+echo CONFIG_XFS_POSIX_ACL=y >> .config
+echo CONFIG_XFS_RT=y >> .config
+
