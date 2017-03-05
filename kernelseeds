@@ -1,50 +1,96 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-if [ $# -eq 0 -o \
-     $# -eq 1 -a "$1" = "-h" -o \
-     \( $# -ne 2 -a $# -ne 3 \) ]; then
-	printf "This script applies a set of kernel options to an existing .config.\n"
-	printf "Usage:\n"
-	printf "  apply-options.sh [options] config_seed_path kernel_source_path\n"
-	printf "Options:\n"
-	printf "  --override\n"
-	printf "    All the kernel seed options are concatenated to the end of the existing\n"
-	printf "    .config file, overriding previously set options to the new kernel seed value\n"
-	printf "    if one is set.\n"
-	printf "Example:\n"
-	printf "  # cd /usr/src/linux\n"
-	printf "  # make mrproper defconfig\n"
-	printf "  # apply-options.sh --override /usr/src/kernel-seeds/3.14.25 .\n"
-	exit 1
-fi
+NAME="Kernel Seeds"
+CODENAME="kernelseeds"
+COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
+LICENSE="GNU General Public License 2.0"
+VERSION="0.0.0.0"
 
-TMP=/tmp/kernel-seeds.$$
-mkdir "$TMP"
+# \brief Displays the help and exits the program
+function kernelseeds_help
+{
+	#     01234567890123456789012345678901234567890123456789012345678901234567890123456789
+	echo "Description:"
+	echo "  Apply a set of kernel options to a new or existing kernel configuration."
+	echo
+	echo "Usage:"
+	echo "  $CODENAME [options] config_seed_path kernel_source_path"
+	echo
+	echo "Options:"
+	echo "  --override"
+	echo "    All the kernel seed options are concatenated to the end of the existing"
+	echo "    .config file, overriding previously set options to the new kernel seed value"
+	echo "    if one is set.\n"
+	echo "  -h"
+	echo "    Display this help message and exit."
+	echo
+	echo "Example:"
+	echo "  # cd /usr/src/linux"
+	echo "  # make mrproper defconfig"
+	echo "  # $CODENAME --override /usr/src/kernel-seeds/3.14.25 ."
+	echo
+	echo "Version:"
+	echo "  $NAME $VERSION"
+	echo "  $COPYRIGHT"
+	echo "  Licensed under $LICENSE"
+	exit
+}
+
+#------------------------------------------------------------------------------
+# default configuration
 
 OVERRIDE=false
+TMP="/tmp"
 
+#------------------------------------------------------------------------------
+# command line arguments
+
+THIS="$0"
 while [ $# -gt 2 ]; do
-	if [ "$1" = "--override" ]; then
-		OVERRIDE=true
-		shift
-	fi
+	case "$1" in
+		"-h"|"--help")
+			kernelseeds_help
+			;;
+		"--override")
+			OVERRIDE=true
+			shift
+			;;
+		*)
+			kernelseeds_help
+			;;
+	esac
 done
-
+if [ $# -ne 2 ]; then
+	kernelseeds_help
+fi
 CONFIG_SEED_PATH="$1"
 shift
+if [ ! -d "$CONFIG_SEED_PATH" ]; then
+	echo "error: the config_seed_path at \"$CONFIG_SEED_PATH\" is not a directory"
+	exit 1
+fi
 KERNEL_SOURCE_PATH="$1"
 shift
-
-if [ ! -d "$CONFIG_SEED_PATH" ]; then
-	printf "apply-options.sh: The config_seed_path at \"$CONFIG_SEED_PATH\" is not accessible\n"
-	exit 1
-fi
 if [ ! -d "$KERNEL_SOURCE_PATH" ]; then
-	printf "apply-options.sh: The kernel_source_path at \"$KERNEL_SOURCE_PATH\" is not accessible\n"
-	exit 1
+	echo "error: the kernel_source_path at \"$KERNEL_SOURCE_PATH\" is not a directory"
+	exit 2
 fi
+if [ ! -f "$KERNEL_SOURCE_PATH/Makefile" ]; then
+	echo "error: the kernel_source_path at \"$KERNEL_SOURCE_PATH\" does not appear to contain a kernel Makefile"
+	exit 3
+fi
+
+#------------------------------------------------------------------------------
+# prepare environment
+
+TMP="$TMP/$CODENAME.$$"
+mkdir -p "$TMP"
+
+#------------------------------------------------------------------------------
+# begin execution
+
 if [ ! -f "$KERNEL_SOURCE_PATH/.config" ]; then
-	echo "No .config file was found at \"$KERNEL_SOURCE_PATH\""
+	echo "A .config file was not found at \"$KERNEL_SOURCE_PATH\"/.config"
 	echo "Generating a new .config file with \"make defconfig\""
 	pushd "$KERNEL_SOURCE_PATH"
 		make defconfig
