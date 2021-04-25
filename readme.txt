@@ -2,22 +2,31 @@ Description:
   Apply a set of kernel options to a new or existing kernel configuration.
 
 Usage:
-  kernelseeds [options] config_seed_path kernel_source_path
+  kernelseeds [options]
 
 Options:
-  --override
-    All the kernel seed options are concatenated to the end of the existing
-    .config file, overriding previously set options to the new kernel seed value
-    if one is set.
-  -h
+  -a, --architecture x86
+    Change ARCH when configuring the kernel.
+    Possible architectures are defined at kernel-source/arch/*:
+  --apply-seed-path path/to/options
+    Apply the options at the provided path.
+  --apply-system-raspberry-pi-2
+    Apply changes to support the Raspberry Pi 2.
+  --enable-all-menuconfig
+    Enable all menu options which unhide additional options.
+  --enable-all-modules
+    Enable all non-overriding modules.
+  -h, --help
     Display this help message and exit.
+  --tmpfs
+    Use tmpfs to improve performance of /tmp.
 
 Example:
   # cd /usr/src/linux
-  # make mrproper defconfig
-  # kernelseeds --override /usr/src/kernelseeds/4.10 .
+  # make mrproper
+  # kernelseeds -a arm --enable-all-menuconfig --enable-all-modules
 
 Version:
-  Kernel Seeds 1.0.0.0
+  Kernel Seeds 3.0.0.0
   Copyright (C) 2013 Nathan Shearer
   Licensed under GNU General Public License 2.0

@@ -4,7 +4,7 @@ NAME="Kernel Seeds"
 CODENAME="kernelseeds"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="2.0.0.0"
+VERSION="3.0.0.0"
 
 function kernelseeds_apply_seed_path
 {
@@ -60,18 +60,18 @@ function kernelseeds_enable_all_modules
 	echo "Enabling all modules which do not override existing options"
 
 	if [ -f .config ]; then
-		echo "Backing up original .config to .config.backup"
+		#echo "Backing up original .config to .config.backup"
 		cp -f .config .config.backup
 	else
 		kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
 	fi
 
-	echo -n "Generating allmodconfig..."
+	#echo -n "Generating allmodconfig..."
 	kernelseeds_quiet make clean mrproper
 	kernelseeds_quiet make allmodconfig
 	mv -f .config .config.allmodconfig
 	cp -f .config.backup .config
-	echo " done."
+	#echo " done."
 	
 	cd "$KERNEL_SOURCE_PATH"
 	cp -f .config .config.enable_all_modules
@@ -94,26 +94,30 @@ function kernelseeds_enable_all_modules
 			if make olddefconfig 2>&1 | grep -q override; then
 				# skip this option due to override
 				cp -f .config.enable_all_modules .config
-				echo "Skipped: $OPTION"
+				#echo "  Skipped: $OPTION"
 				MODULES_SKIPPED=$(($MODULES_SKIPPED+1))
 			else
 				if grep -E -q "$OPTION=m" .config; then
 					# this module was enabled without causing an override
-					echo "Enabled: $OPTION"
+					echo "  Enabled: $OPTION"
 					MODULES_ENABLED=$(($MODULES_ENABLED+1))
 				else
 					# this module was not enabled by make olddefconfig so skip it
-					echo "Pruned: $OPTION"
+					#echo "  Pruned: $OPTION"
 					MODULES_PRUNED=$(($MODULES_PRUNED+1))
 				fi
 			fi
 			MODULES_TOTAL=$(($MODULES_TOTAL+1))
-			#echo "Enabled: $MODULES_ENABLED"
-			#echo "Skipped: $MODULES_SKIPPED"
-			#echo "Pruned: $MODULES_PRUNED"
-			#echo "Total: $MODULES_TOTAL"
+			#echo "  Enabled: $MODULES_ENABLED"
+			#echo "  Skipped: $MODULES_SKIPPED"
+			#echo "  Pruned: $MODULES_PRUNED"
+			#echo "  Total: $MODULES_TOTAL"
 		fi
 	done <.config.allmodconfig
+	echo "  Modules Enabled: $MODULES_ENABLED"
+	echo "  Modules Skipped: $MODULES_SKIPPED"
+	echo "  Modules Pruned: $MODULES_PRUNED"
+	echo "  Total: $MODULES_TOTAL"
 }
 
 function kernelseeds_help
@@ -126,8 +130,13 @@ function kernelseeds_help
 	echo "  kernelseeds [options]"
 	echo
 	echo "Options:"
+	echo "  -a, --architecture x86"
+	echo "    Change ARCH when configuring the kernel."
+	echo "    Possible architectures are defined at kernel-source/arch/*:"
 	echo "  --apply-seed-path path/to/options"
 	echo "    Apply the options at the provided path."
+	echo "  --apply-system-raspberry-pi-2"
+	echo "    Apply changes to support the Raspberry Pi 2."
 	echo "  --enable-all-menuconfig"
 	echo "    Enable all menu options which unhide additional options."
 	echo "  --enable-all-modules"
@@ -140,7 +149,7 @@ function kernelseeds_help
 	echo "Example:"
 	echo "  # cd /usr/src/linux"
 	echo "  # make mrproper"
-	echo "  # kernelseeds --enable-all-menuconfig --enable-all-modules"
+	echo "  # kernelseeds -a arm --enable-all-menuconfig --enable-all-modules"
 	echo
 	echo "Version:"
 	echo "  $NAME $VERSION"
@@ -169,6 +178,7 @@ KERNEL_SOURCE_PATH=.
 ALL_MENUCONFIG=false
 ALL_MODULES=false
 SEED_PATH=""
+APPLY_SYSTEM_RASPBERRY_PI_2=false
 OVERRIDE=true
 TMPFS=false
 TMP="/tmp"
@@ -178,6 +188,14 @@ TMP="/tmp"
 
 while [ $# -gt 0 ]; do
 	case "$1" in
+		"-a"|"--architecture")
+			ARCH="$2"
+			shift 2
+			;;
+		"--apply-system-raspberry-pi-2")
+			APPLY_SYSTEM_RASPBERRY_PI_2=true
+			shift
+			;;
 		"--apply-seed-path")
 			SEED_PATH="$2"
 			shift 2
@@ -219,7 +237,7 @@ fi
 TMP="$TMP/$CODENAME.$$"
 mkdir -m 0700 -p "$TMP"
 if $TMPFS; then
-	mount -t tmpfs none "$TMPFS"
+	mount -t tmpfs none "$TMP"
 fi
 
 #------------------------------------------------------------------------------
@@ -235,37 +253,104 @@ if $ALL_MENUCONFIG; then
 	kernelseeds_enable_all_menuconfig "$KERNEL_SOURCE_PATH"
 fi
 
-if $ALL_MODULES; then
-	kernelseeds_enable_all_modules "$KERNEL_SOURCE_PATH"
-fi
-
 if [ "$SEED_PATH" != "" ]; then
 	kernelseeds_apply_seed_path "$KERNEL_SOURCE_PATH" "$SEED_PATH"
 fi
 
-# A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver
-# Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Pre-allocated buffer size for HD-audio driver
+if $ALL_MODULES; then
+	kernelseeds_enable_all_modules "$KERNEL_SOURCE_PATH"
+fi
+
+if $APPLY_SYSTEM_RASPBERRY_PI_2; then
+	echo "Build in SD card support to enable booting off of SD cards"
+	echo "  Device Drivers > MMC/SD/SDIO card support"
+	echo 'CONFIG_MMC=y' >>.config
+	echo "  Device Drivers > MMC/SD/SDIO card support > MMC block device driver"
+	echo 'CONFIG_MMC_BLOCK=y' >>.config
+
+	echo "Build in support for the Raspberry Pi SD/MMC controller"
+	echo "  Device Drivers > MMC/SD/SDIO card support > Secure Digital Host Controller Interface support"
+	echo 'CONFIG_MMC_SDHCI=y' >>.config
+	echo "  Device Drivers > MMC/SD/SDIO card support > SDHCI platform and OF driver helper"
+	echo 'MMC_SDHCI_PLTFM=y' >>.config
+	echo "  Device Drivers > MMC/SD/SDIO card support > SDHCI platform support for the BCM2835 SD/MMC Controller"
+	echo 'MMC_SDHCI_BCM2835=y' >>.config
+
+	echo "Build in support for the Raspberry Pi GPU"
+	echo "  Devices Drivers > Graphics support > Frame buffer Devices > Support for frame buffer devices"
+	echo 'CONFIG_FB=y' >>.config
+	echo "  Devices Drivers > Graphics support > Frame buffer Devices > Support for frame buffer devices > BCM2708 framebuffer support"
+	echo 'CONFIG_FB_BCM2708=y' >>.config
+	echo "  Devices Drivers > Graphics support > Console display driver support"
+	echo 'CONFIG_FRAMEBUFFER_CONSOLE=y' >>.config
+
+	echo "Enable support for 3D acceleration"
+	echo "  Devices Drivers > Graphics support > Direct Rendering Manager (XFree86 4.1.0 and higher DRI support)"
+	echo 'CONFIG_DRM=m' >>.config
+	echo "  Devices Drivers > Graphics support > Broadcom VC4 Graphics"
+	echo 'CONFIG_DRM_VC4=m' >>.config
+	echo "Note: This driver requires that \"avoid_warnings=2\" be present in the config.txt for the firmware, to keep it from smashing the display setup."
+
+	echo "Build in support for the Raspberry Pi Ethernet Chipset"
+	echo "  Device Drivers > Network device support > USB Network Adapters > Multi-purpose USB Networking Framework > SMSC LAN95XX based USB 2.0 10/100 ethernet devices"
+	echo 'CONFIG_USB_NET_SMSC95XX=y' >>.config
+
+	echo "Disable seccomp due to compile error: \"gcc: error: unrecognized command line option ‘-m32’; did you mean ‘-mbe32’?\""
+	echo "  Kernel Features             > Enable seccomp to safely compute untrusted bytecode"
+	echo "  Processor type and features > Enable seccomp to safely compute untrusted bytecode"
+	echo 'CONFIG_SECCOMP=n' >>.config
+
+	kernelseeds_quiet make olddefconfig
+fi
+
+echo "Enable builtin support for nvme"
+echo "  Device Drivers > NVME Support > NVM Express block device"
+echo 'CONFIG_BLK_DEV_NVME=y' >>.config
+
+echo "A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver"
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Pre-allocated buffer size for HD-audio driver"
 echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' >>.config
 
-# Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)
+echo "Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)"
 echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' >>.config
 
-# Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))
+echo "Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))"
 echo 'CONFIG_PREEMPT=y' >>.config
 
-# Disable evbug because it is autoloaded and fills the system logs
-# Device Drivers > Input device support > Event debugging
+echo "Enable builtin support for virtio"
+echo "  Device Drivers > Remoteproc drivers > Support for Remote Processor subsystem"
+echo 'CONFIG_REMOTEPROC=y' >>.config
+echo "  Device Drivers > Virtio drivers > PCI driver for virtio devices"
+echo 'CONFIG_VIRTIO_PCI=y' >>.config
+echo "  Device Drivers > Block devices > Virtio block driver"
+echo 'CONFIG_VIRTIO_BLK=y' >>.config
+echo "  Device Drivers > SCSI device support > SCSI low-level drivers > virtio-scsi support"
+echo 'CONFIG_SCSI_VIRTIO=y' >>.config
+echo "  Device Drivers > Network device support > Network core driver support > Virtio network driver"
+echo 'CONFIG_VIRTIO_NET=y' >>.config
+echo "  Device Drivers > Character devices > Hardware Random Number Generator Core support > VirtIO Random Number Generator support"
+echo 'CONFIG_HW_RANDOM_VIRTIO=y' >>.config
+
+echo "Disable evbug because it is autoloaded and fills the system logs"
+echo "  Device Drivers > Input device support > Event debugging"
 echo 'CONFIG_INPUT_EVBUG=n' >>.config
 
-# USB Attached SCSI is broken for seagate drives
-# Device Drivers > USB support > USB Attached SCSI
+echo "USB Attached SCSI is broken for seagate drives"
+echo "  Device Drivers > USB support > USB Attached SCSI"
 echo 'CONFIG_USB_UAS=n' >>.config
 
-# Google Chrome requirement
-# General setup > Namespaces support > User namespace
+echo "dev-libs/ell and sys-apps/keyutils require CONFIG_KEY_DH_OPERATIONS"
+echo "  Security options > Enable access key retention support > Diffie-Hellman operations on retained keys"
+echo 'CONFIG_KEY_DH_OPERATIONS=y' >>.config
+echo "media-libs/mesa requires CONFIG_CHECKPOINT_RESTORE"
+echo "  General setup > Checkpoint/restore support"
+echo 'CONFIG_CHECKPOINT_RESTORE=y' >>.config
+echo "www-client/google-chrome requires CONFIG_USER_NS"
+echo "  General setup > Namespaces support > User namespace"
 echo 'CONFIG_USER_NS=y' >>.config
 
-# Security options > NSA SELinux Support
+echo "Disable SELinux"
+echo "  Security options > NSA SELinux Support"
 echo 'CONFIG_SECURITY_SELINUX=n' >>.config
 
 kernelseeds_quiet make olddefconfig
