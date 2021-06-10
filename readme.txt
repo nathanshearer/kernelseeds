@@ -23,10 +23,18 @@ Options:
 
 Example:
   # cd /usr/src/linux
-  # make mrproper
+  # make clean mrproper
+  # gzip -c -d /proc/config.gz > .config
+  # kernelseeds --enable-all-menuconfig --enable-all-modules
+  # make && make modules_install
+
+Example:
+  # cd /usr/src/linux-arm
+  # make clean mrproper
   # kernelseeds -a arm --enable-all-menuconfig --enable-all-modules
+  # make && make modules_install
 
 Version:
-  Kernel Seeds 3.0.0.0
+  Kernel Seeds 3.0.1.0
   Copyright (C) 2013 Nathan Shearer
   Licensed under GNU General Public License 2.0

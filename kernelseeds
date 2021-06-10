@@ -4,7 +4,7 @@ NAME="Kernel Seeds"
 CODENAME="kernelseeds"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="3.0.0.0"
+VERSION="3.0.1.0"
 
 function kernelseeds_apply_seed_path
 {
@@ -47,7 +47,10 @@ function kernelseeds_enable_all_menuconfig
 	
 	cd "$KERNEL_SOURCE_PATH"
 	for OPTION in $(find "$KERNEL_SOURCE_PATH" -name Kconfig -exec grep menuconfig {} \; | sed -e 's/menuconfig //'); do
-		echo "CONFIG_$OPTION=y" >>.config
+		if grep -E -q "^# CONFIG_$OPTION" .config; then
+			echo "  Enabled: CONFIG_$OPTION"
+			echo "CONFIG_$OPTION=y" >>.config
+		fi
 	done
 	kernelseeds_quiet make olddefconfig
 }
@@ -148,8 +151,16 @@ function kernelseeds_help
 	echo
 	echo "Example:"
 	echo "  # cd /usr/src/linux"
-	echo "  # make mrproper"
+	echo "  # make clean mrproper"
+	echo "  # gzip -c -d /proc/config.gz > .config"
+	echo "  # kernelseeds --enable-all-menuconfig --enable-all-modules"
+	echo "  # make && make modules_install"
+	echo
+	echo "Example:"
+	echo "  # cd /usr/src/linux-arm"
+	echo "  # make clean mrproper"
 	echo "  # kernelseeds -a arm --enable-all-menuconfig --enable-all-modules"
+	echo "  # make && make modules_install"
 	echo
 	echo "Version:"
 	echo "  $NAME $VERSION"
@@ -189,7 +200,7 @@ TMP="/tmp"
 while [ $# -gt 0 ]; do
 	case "$1" in
 		"-a"|"--architecture")
-			ARCH="$2"
+			export ARCH="$2"
 			shift 2
 			;;
 		"--apply-system-raspberry-pi-2")
@@ -303,12 +314,33 @@ if $APPLY_SYSTEM_RASPBERRY_PI_2; then
 	kernelseeds_quiet make olddefconfig
 fi
 
+echo "Enable builtin support for USB"
+echo 'CONFIG_USB_SUPPORT=y' >>.config
+echo 'CONFIG_USB_XHCI_PCI=y' >>.config
+echo 'CONFIG_USB_XHCI_PCI_RENESAS=y' >>.config
+
 echo "Enable builtin support for nvme"
 echo "  Device Drivers > NVME Support > NVM Express block device"
 echo 'CONFIG_BLK_DEV_NVME=y' >>.config
 
+echo "Enable builtin support for RAID"
+echo 'CONFIG_BLK_DEV_MD=y' >>.config
+echo 'CONFIG_MD_LINEAR=y' >>.config
+echo 'CONFIG_MD_RAID0=y' >>.config
+echo 'CONFIG_MD_RAID1=y' >>.config
+echo 'CONFIG_MD_RAID10=y' >>.config
+echo 'CONFIG_MD_RAID456=y' >>.config
+
+echo "Enable support for audio over HDMI"
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > HD Audio PCI (CONFIG_SND_HDA_INTEL=y)"
+echo 'CONFIG_SND_HDA_INTEL=y' >>.config
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Build HDMI/DisplayPort HD-audio codec support (CONFIG_SND_HDA_CODEC_HDMI=y)"
+echo 'CONFIG_SND_HDA_CODEC_HDMI=y' >>.config
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Enable generic HD-audio codec parser (CONFIG_SND_HDA_GENERIC=y)"
+echo 'CONFIG_SND_HDA_GENERIC=y' >>.config
+
 echo "A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver"
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Pre-allocated buffer size for HD-audio driver"
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > Pre-allocated buffer size for HD-audio driver (CONFIG_SND_HDA_PREALLOC_SIZE=2048)"
 echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' >>.config
 
 echo "Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)"
@@ -355,6 +387,7 @@ echo 'CONFIG_SECURITY_SELINUX=n' >>.config
 
 kernelseeds_quiet make olddefconfig
 
+unset ARCH
 if $TMPFS; then
 	umount "$TMP"
 fi
