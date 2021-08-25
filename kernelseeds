@@ -4,7 +4,7 @@ NAME="Kernel Seeds"
 CODENAME="kernelseeds"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="3.0.1.0"
+VERSION="3.0.2.0"
 
 function kernelseeds_apply_seed_path
 {
@@ -362,6 +362,14 @@ echo "  Device Drivers > Network device support > Network core driver support > 
 echo 'CONFIG_VIRTIO_NET=y' >>.config
 echo "  Device Drivers > Character devices > Hardware Random Number Generator Core support > VirtIO Random Number Generator support"
 echo 'CONFIG_HW_RANDOM_VIRTIO=y' >>.config
+
+echo "Enable iptables"
+echo 'CONFIG_NETFILTER=y' >>.config
+echo 'CONFIG_IP_NF_FILTER=m' >>.config
+echo 'CONFIG_IP_NF_NAT=m' >>.config
+echo 'CONFIG_IP_NF_TARGET_MASQUERADE=m' >>.config
+echo 'CONFIG_IP_NF_TARGET_NETMAP=m' >>.config
+echo 'CONFIG_IP_NF_TARGET_REDIRECT=m' >>.config
 
 echo "Disable evbug because it is autoloaded and fills the system logs"
 echo "  Device Drivers > Input device support > Event debugging"
