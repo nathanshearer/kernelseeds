@@ -372,14 +372,18 @@ echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture 
 echo 'CONFIG_SND_HDA_GENERIC=y' >>.config
 
 echo "Enable VMware support"
-echo "  Device Drivers > SCSI device support > SCSI low-level drivers > VMware PVSCSI driver support (VMWARE_PVSCSI=y)"
-echo 'VMWARE_PVSCSI=y' >>.config
+echo "  Device Drivers > SCSI device support > SCSI low-level drivers > VMware PVSCSI driver support (CONFIG_VMWARE_PVSCSI=y)"
+echo 'CONFIG_VMWARE_PVSCSI=y' >>.config
+echo "  Device Drivers > SCSI device support > SCSI low-level drivers > Legacy MPT2SAS config option (CONFIG_SCSI_MPT2SAS=y)"
+echo 'CONFIG_SCSI_MPT2SAS=y' >>.config
+echo "  Device Drivers > SCSI device support > SCSI low-level drivers > LSI MPT Fusion SAS 3.0 & SAS 2.0 Device Driver (CONFIG_SCSI_MPT3SAS=y)"
+echo 'CONFIG_SCSI_MPT3SAS=y' >>.config
 echo "  Device Drivers > Graphics support > DRM driver for VMware Virtual GPU (CONFIG_DRM_VMWGFX=y))"
 echo 'CONFIG_DRM_VMWGFX=y' >>.config
 echo '  Device Drivers > Graphics support > DRM driver for VMware Virtual GPU > Enable framebuffer console under vmwgfx by default (CONFIG_DRM_VMWGFX_FBCON=y)' >>.config
 echo 'CONFIG_DRM_VMWGFX_FBCON=y' >>.config
-echo '  Networking support > Networking options > Virtual Socket protocol (VMWARE_VMCI_VSOCKETS=m)' >>.config
-echo 'VMWARE_VMCI_VSOCKETS=m' >>.config
+echo '  Networking support > Networking options > Virtual Socket protocol (CONFIG_VMWARE_VMCI_VSOCKETS=m)' >>.config
+echo 'CONFIG_VMWARE_VMCI_VSOCKETS=m' >>.config
 
 echo "A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver"
 echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > Pre-allocated buffer size for HD-audio driver (CONFIG_SND_HDA_PREALLOC_SIZE=2048)"
