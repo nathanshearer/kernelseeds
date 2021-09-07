@@ -314,6 +314,16 @@ if $APPLY_SYSTEM_RASPBERRY_PI_2; then
 	kernelseeds_quiet make olddefconfig
 fi
 
+echo "Enable NFS"
+echo 'CONFIG_NFSD=m' >>.config
+echo 'CONFIG_NFSD_V3=y' >>.config
+echo 'CONFIG_NFSD_V3_ACL=y' >>.config
+echo 'CONFIG_NFSD_V4=y' >>.config
+echo 'CONFIG_NFSD_BLOCKLAYOUT=y' >>.config
+echo 'CONFIG_NFSD_SCSILAYOUT=y' >>.config
+echo 'CONFIG_NFSD_FLEXFILELAYOUT=y' >>.config
+echo 'CONFIG_NFSD_V4_SECURITY_LABEL=y' >>.config
+
 echo "Enable builtin support for USB"
 echo 'CONFIG_USB_SUPPORT=y' >>.config
 echo 'CONFIG_USB_XHCI_PCI=y' >>.config
