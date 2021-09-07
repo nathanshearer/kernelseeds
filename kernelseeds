@@ -314,7 +314,15 @@ if $APPLY_SYSTEM_RASPBERRY_PI_2; then
 	kernelseeds_quiet make olddefconfig
 fi
 
-echo "Enable NFS"
+echo "Enable iptables support"
+echo 'CONFIG_NETFILTER=y' >>.config
+echo 'CONFIG_IP_NF_FILTER=m' >>.config
+echo 'CONFIG_IP_NF_NAT=m' >>.config
+echo 'CONFIG_IP_NF_TARGET_MASQUERADE=m' >>.config
+echo 'CONFIG_IP_NF_TARGET_NETMAP=m' >>.config
+echo 'CONFIG_IP_NF_TARGET_REDIRECT=m' >>.config
+
+echo "Enable NFS support"
 echo 'CONFIG_NFSD=m' >>.config
 echo 'CONFIG_NFSD_V3=y' >>.config
 echo 'CONFIG_NFSD_V3_ACL=y' >>.config
@@ -324,16 +332,11 @@ echo 'CONFIG_NFSD_SCSILAYOUT=y' >>.config
 echo 'CONFIG_NFSD_FLEXFILELAYOUT=y' >>.config
 echo 'CONFIG_NFSD_V4_SECURITY_LABEL=y' >>.config
 
-echo "Enable builtin support for USB"
-echo 'CONFIG_USB_SUPPORT=y' >>.config
-echo 'CONFIG_USB_XHCI_PCI=y' >>.config
-echo 'CONFIG_USB_XHCI_PCI_RENESAS=y' >>.config
-
-echo "Enable builtin support for nvme"
+echo "Enable NVMe support"
 echo "  Device Drivers > NVME Support > NVM Express block device"
 echo 'CONFIG_BLK_DEV_NVME=y' >>.config
 
-echo "Enable builtin support for RAID"
+echo "Enable RAID support"
 echo 'CONFIG_BLK_DEV_MD=y' >>.config
 echo 'CONFIG_MD_LINEAR=y' >>.config
 echo 'CONFIG_MD_RAID0=y' >>.config
@@ -341,25 +344,12 @@ echo 'CONFIG_MD_RAID1=y' >>.config
 echo 'CONFIG_MD_RAID10=y' >>.config
 echo 'CONFIG_MD_RAID456=y' >>.config
 
-echo "Enable support for audio over HDMI"
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > HD Audio PCI (CONFIG_SND_HDA_INTEL=y)"
-echo 'CONFIG_SND_HDA_INTEL=y' >>.config
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Build HDMI/DisplayPort HD-audio codec support (CONFIG_SND_HDA_CODEC_HDMI=y)"
-echo 'CONFIG_SND_HDA_CODEC_HDMI=y' >>.config
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Enable generic HD-audio codec parser (CONFIG_SND_HDA_GENERIC=y)"
-echo 'CONFIG_SND_HDA_GENERIC=y' >>.config
+echo "Enable USB support"
+echo 'CONFIG_USB_SUPPORT=y' >>.config
+echo 'CONFIG_USB_XHCI_PCI=y' >>.config
+echo 'CONFIG_USB_XHCI_PCI_RENESAS=y' >>.config
 
-echo "A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver"
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > Pre-allocated buffer size for HD-audio driver (CONFIG_SND_HDA_PREALLOC_SIZE=2048)"
-echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' >>.config
-
-echo "Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)"
-echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' >>.config
-
-echo "Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))"
-echo 'CONFIG_PREEMPT=y' >>.config
-
-echo "Enable builtin support for virtio"
+echo "Enable VirtIO support"
 echo "  Device Drivers > Remoteproc drivers > Support for Remote Processor subsystem"
 echo 'CONFIG_REMOTEPROC=y' >>.config
 echo "  Device Drivers > Virtio drivers > PCI driver for virtio devices"
@@ -373,13 +363,33 @@ echo 'CONFIG_VIRTIO_NET=y' >>.config
 echo "  Device Drivers > Character devices > Hardware Random Number Generator Core support > VirtIO Random Number Generator support"
 echo 'CONFIG_HW_RANDOM_VIRTIO=y' >>.config
 
-echo "Enable iptables"
-echo 'CONFIG_NETFILTER=y' >>.config
-echo 'CONFIG_IP_NF_FILTER=m' >>.config
-echo 'CONFIG_IP_NF_NAT=m' >>.config
-echo 'CONFIG_IP_NF_TARGET_MASQUERADE=m' >>.config
-echo 'CONFIG_IP_NF_TARGET_NETMAP=m' >>.config
-echo 'CONFIG_IP_NF_TARGET_REDIRECT=m' >>.config
+echo "Enable audio over HDMI support"
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > HD Audio PCI (CONFIG_SND_HDA_INTEL=y)"
+echo 'CONFIG_SND_HDA_INTEL=y' >>.config
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Build HDMI/DisplayPort HD-audio codec support (CONFIG_SND_HDA_CODEC_HDMI=y)"
+echo 'CONFIG_SND_HDA_CODEC_HDMI=y' >>.config
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Enable generic HD-audio codec parser (CONFIG_SND_HDA_GENERIC=y)"
+echo 'CONFIG_SND_HDA_GENERIC=y' >>.config
+
+echo "Enable VMware support"
+echo "  Device Drivers > SCSI device support > SCSI low-level drivers > VMware PVSCSI driver support (VMWARE_PVSCSI=y)"
+echo 'VMWARE_PVSCSI=y' >>.config
+echo "  Device Drivers > Graphics support > DRM driver for VMware Virtual GPU (CONFIG_DRM_VMWGFX=y))"
+echo 'CONFIG_DRM_VMWGFX=y' >>.config
+echo '  Device Drivers > Graphics support > DRM driver for VMware Virtual GPU > Enable framebuffer console under vmwgfx by default (CONFIG_DRM_VMWGFX_FBCON=y)' >>.config
+echo 'CONFIG_DRM_VMWGFX_FBCON=y' >>.config
+echo '  Networking support > Networking options > Virtual Socket protocol (VMWARE_VMCI_VSOCKETS=m)' >>.config
+echo 'VMWARE_VMCI_VSOCKETS=m' >>.config
+
+echo "A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver"
+echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > Pre-allocated buffer size for HD-audio driver (CONFIG_SND_HDA_PREALLOC_SIZE=2048)"
+echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' >>.config
+
+echo "Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)"
+echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' >>.config
+
+echo "Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))"
+echo 'CONFIG_PREEMPT=y' >>.config
 
 echo "Disable evbug because it is autoloaded and fills the system logs"
 echo "  Device Drivers > Input device support > Event debugging"
