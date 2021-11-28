@@ -4,7 +4,7 @@ NAME="Kernel Seeds"
 CODENAME="kernelseeds"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="3.1.0.0"
+VERSION="3.2.0.0"
 
 function kernelseeds_apply_seed_path
 {
@@ -314,6 +314,65 @@ if $APPLY_SYSTEM_RASPBERRY_PI_2; then
 	kernelseeds_quiet make olddefconfig
 fi
 
+echo "Enable EFI Stub Support"
+printf "  "; printf "CONFIG_EFI=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EFI_STUB=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EFI_MIXED=n\n" | tee -a .config
+
+echo "Enable Framebuffer Support"
+printf "  "; printf "CONFIG_FB=y\n" | tee -a .config
+printf "  "; printf "CONFIG_FRAMEBUFFER_CONSOLE=y\n" | tee -a .config
+
+echo "Enable Advanced Partition Support"
+printf "  "; printf "CONFIG_BLOCK=y\n" | tee -a .config
+printf "  "; printf "CONFIG_PARTITION_ADVANCED=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION_CUMANA=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION_EESOX=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION_ICS=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION_ADFS=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION_POWERTEC=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ACORN_PARTITION_RISCIX=y\n" | tee -a .config
+printf "  "; printf "CONFIG_AIX_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_OSF_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_AMIGA_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ATARI_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_MAC_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_BSD_DISKLABEL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_MINIX_SUBPARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_SOLARIS_X86_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_UNIXWARE_DISKLABEL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_LDM_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_SGI_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_ULTRIX_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_SUN_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_KARMA_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_SYSV68_PARTITION=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CMDLINE_PARTITION=y\n" | tee -a .config
+
+echo "Enable Ext Support"
+printf "  "; printf "CONFIG_EXT2_FS=m\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT2_FS_XATTR=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT2_FS_POSIX_ACL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT2_FS_SECURITY=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT3_FS=m\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT3_FS_POSIX_ACL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT3_FS_SECURITY=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT4_FS=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT4_FS_POSIX_ACL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_EXT4_FS_SECURITY=y\n" | tee -a .config
+
+echo "Enable XFS Support"
+printf "  "; printf "CONFIG_XFS_FS=m\n" | tee -a .config
+printf "  "; printf "CONFIG_XFS_SUPPORT_V4=y\n" | tee -a .config
+printf "  "; printf "CONFIG_XFS_QUOTA=y\n" | tee -a .config
+printf "  "; printf "CONFIG_XFS_POSIX_ACL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_XFS_RT=y\n" | tee -a .config
+
+echo "Enable Btrfs Support"
+printf "  "; printf "CONFIG_BTRFS_FS=m\n" | tee -a .config
+printf "  "; printf "CONFIG_BTRFS_FS_POSIX_ACL=y\n" | tee -a .config
+
 echo "Enable iptables support"
 echo 'CONFIG_NETFILTER=y' >>.config
 echo 'CONFIG_IP_NF_FILTER=m' >>.config
@@ -343,6 +402,18 @@ echo 'CONFIG_NFSD_SCSILAYOUT=y' >>.config
 echo 'CONFIG_NFSD_FLEXFILELAYOUT=y' >>.config
 echo 'CONFIG_NFSD_V4_SECURITY_LABEL=y' >>.config
 
+echo "Enable SMB Support"
+printf "  "; printf "CONFIG_NETWORK_FILESYSTEMS=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS=m\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_ALLOW_INSECURE_LEGACY=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_WEAK_PW_HASH=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_UPCALL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_XATTR=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_POSIX=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_DFS_UPCALL=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_SMB_DIRECT=y\n" | tee -a .config
+printf "  "; printf "CONFIG_CIFS_FSCACHE=y\n" | tee -a .config
+
 echo "Enable NVMe support"
 echo "  Device Drivers > NVME Support > NVM Express block device"
 echo 'CONFIG_BLK_DEV_NVME=y' >>.config
@@ -356,9 +427,32 @@ echo 'CONFIG_MD_RAID10=y' >>.config
 echo 'CONFIG_MD_RAID456=y' >>.config
 
 echo "Enable USB support"
-echo 'CONFIG_USB_SUPPORT=y' >>.config
-echo 'CONFIG_USB_XHCI_PCI=y' >>.config
-echo 'CONFIG_USB_XHCI_PCI_RENESAS=y' >>.config
+printf "  "; printf "CONFIG_USB=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_PCI=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_SUPPORT=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_XHCI_HCD=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_XHCI_PCI=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_XHCI_PCI_RENESAS=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_EHCI_HCD=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_OHCI_HCD=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_OHCI_HCD_PCI=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_UHCI_HCD=y\n" | tee -a .config
+
+echo "Enable USB Storage Support"
+printf "  "; printf "CONFIG_USB_STORAGE=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_ALAUDA=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_CYPRESS_ATACB=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_DATAFAB=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_ENE_UB6250=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_FREECOM=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_ISD200=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_JUMPSHOT=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_KARMA=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_ONETOUCH=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_REALTEK=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_SDDR09=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_SDDR55=y\n" | tee -a .config
+printf "  "; printf "CONFIG_USB_STORAGE_USBAT=y\n" | tee -a .config
 
 echo "Enable VirtIO support"
 echo "  Device Drivers > Remoteproc drivers > Support for Remote Processor subsystem"
@@ -406,10 +500,6 @@ echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' >>.config
 echo "Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))"
 echo 'CONFIG_PREEMPT=y' >>.config
 
-echo "Disable evbug because it is autoloaded and fills the system logs"
-echo "  Device Drivers > Input device support > Event debugging"
-echo 'CONFIG_INPUT_EVBUG=n' >>.config
-
 echo "USB Attached SCSI is broken for seagate drives"
 echo "  Device Drivers > USB support > USB Attached SCSI"
 echo 'CONFIG_USB_UAS=n' >>.config
@@ -427,6 +517,19 @@ echo 'CONFIG_USER_NS=y' >>.config
 echo "Disable SELinux"
 echo "  Security options > NSA SELinux Support"
 echo 'CONFIG_SECURITY_SELINUX=n' >>.config
+
+echo "Clear system-wide ring of truted keys and revocation certificates"
+printf "  CONFIG_SYSTEM_TRUSTED_KEYS=""\n"; sed -i -r 's/^CONFIG_SYSTEM_TRUSTED_KEYS=".*"$/CONFIG_SYSTEM_TRUSTED_KEYS=""/' .config
+printf "  CONFIG_SYSTEM_REVOCATION_KEYS=""\n"; sed -i -r 's/^CONFIG_SYSTEM_REVOCATION_KEYS=".*"$/CONFIG_SYSTEM_REVOCATION_KEYS=""/' .config
+
+printf "Disable unnecessary debugging features\n"
+printf "  Disable debug info because it requires pahole at kernel compile time\n"
+printf "    "; printf "CONFIG_DEBUG_INFO=n\n" | tee -a .config
+printf "    "; printf "CONFIG_DEBUG_INFO_BTF=n\n" | tee -a .config
+printf "  Writes \"used greatest stack depth\" to system log\n"
+printf "    "; printf "CONFIG_DEBUG_STACK_USAGE=n\n" | tee -a .config
+printf "  Disable evbug because it is autoloaded and floods the system log\n"
+printf "    "; printf "CONFIG_INPUT_EVBUG=n\n" | tee -a .config
 
 kernelseeds_quiet make olddefconfig
 
