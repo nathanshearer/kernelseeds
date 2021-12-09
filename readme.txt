@@ -35,6 +35,6 @@ Example:
   # make && make modules_install
 
 Version:
-  Kernel Seeds 3.2.0.0
+  Kernel Seeds 3.2.1.0
   Copyright (C) 2013 Nathan Shearer
   Licensed under GNU General Public License 2.0
