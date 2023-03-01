@@ -4,134 +4,128 @@ NAME="Kernel Seeds"
 CODENAME="kernelseeds"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="3.2.1.0"
-
-function kernelseeds_apply_seed_path
-{
-	local KERNEL_SOURCE_PATH="$1"
-	local SEED_PATH="$2"
-	
-	echo "Applying options from \"$SEED_PATH\""
-	
-	cd "$KERNEL_SOURCE_PATH"
-	
-	find "$SEED_PATH" -name options -print0 | xargs -0 cat >> "$TMP"/seed.config
-	touch "$TMP"/new.config
-	for OPTION in $(cat "$TMP"/seed.config); do
-		# if the option is already set
-		if grep "^"$(echo "$OPTION" | sed -r 's/^(CONFIG.*?)=.*$/\1/') "$KERNEL_SOURCE_PATH"/.config >/dev/null; then
-			if $OVERRIDE; then
-				echo "$OPTION"
-				echo "$OPTION" >> "$TMP"/new.config
-			fi
-		else
-			# the option is not set, so set it
-			echo "$OPTION"
-			echo "$OPTION" >> "$TMP"/new.config
-		fi
-	done
-	cat "$TMP"/new.config >> "$KERNEL_SOURCE_PATH"/.config
-
-	make olddefconfig
-}
+VERSION="4.0.0.0"
 
 # The kernel config has menu options which hide or unhide additional options
 # The menuconfig options do not add any code to the kernel
 # Disabled menuconfig options prevents compilation of subsidiary modules
 # This function searches for and enables all menuconfig options
+# $1 The kernel source path
 function kernelseeds_enable_all_menuconfig
 {
 	local KERNEL_SOURCE_PATH="$1"
-	
-	echo "Enabling all menu options which unhide additional options"
-	
-	cd "$KERNEL_SOURCE_PATH"
 	for OPTION in $(find "$KERNEL_SOURCE_PATH" -name Kconfig -exec grep menuconfig {} \; | sed -e 's/menuconfig //'); do
-		if kernelseeds_option_is_set "CONFIG_$OPTION" .config; then
-			OPTION_ALREADY_SET=$(grep -E "^CONFIG_$OPTION=.*$" .config)
-			echo "$OPTION_ALREADY_SET is already set"
-		else
-			printf "CONFIG_$OPTION=y\n" | tee -a .config
+		# attempt =m first then attempt =y
+		if ! kernelseeds_option_is_set .config "CONFIG_$OPTION"; then
+			kernelseeds_set_option "$KERNEL_SOURCE_PATH" "CONFIG_$OPTION" m
+		fi
+		if ! kernelseeds_option_is_set .config "CONFIG_$OPTION"; then
+			kernelseeds_set_option "$KERNEL_SOURCE_PATH" "CONFIG_$OPTION" y
 		fi
 	done
-	kernelseeds_quiet make olddefconfig
 }
 
-# Search for and enable all modules which do not override existing options
+# Enable all modules
+# $1 The kernel source path
 function kernelseeds_enable_all_modules
 {
-	local KERNEL_SOURCE_PATH="$1" 
+	local KERNEL_SOURCE_PATH="$1"
+	
+	rm -rf "$TMP/kernelsource"
+	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+	kernelseeds_quiet make -C "$TMP/kernelsource" clean mrproper
+	kernelseeds_quiet make -C "$TMP/kernelsource" allmodconfig
+	grep -E '^[^#].+=m$' "$TMP/kernelsource/.config" > "$TMP/allmod.config"
+	rm -rf "$TMP/kernelsource"
+	
+	kernelseeds_set_options "$KERNEL_SOURCE_PATH" "$TMP/allmod.config"
+}
 
-	echo "Enabling all modules which do not override existing options"
+# \brief Generate a default config if .config does not exist
+# $1 The kernel source path
+function kernelseeds_defconfig
+{
+	if [ ! -f "$1/.config" ]; then
+		echo -n "An existing config was not found at \"$1/.config\". Generating a new default config..."
+		#pushd "$1" > /dev/null
+		kernelseeds_quiet make -C "$1" defconfig
+		#popd > /dev/null
+		echo " done."
+	fi
+}
 
-	if [ -f .config ]; then
-		#echo "Backing up original .config to .config.backup"
-		cp -f .config .config.backup
+# \brief Set a kernel option
+# $1 The kernel source path
+# $2 The kernel option
+# $3 y|m The kernel option value
+# $4 true|false Replace existing values with the new value if the option is already set. Default is false.
+# $5 true|false Allow overrides during "make olddefconfig". Default is false.
+function kernelseeds_set_option
+{
+	local KERNEL_SOURCE_PATH="$1"
+	local OPTION="$2"
+	local VALUE="$3"
+	local OPTION_VALUE="${OPTION}=$VALUE"
+	local ALLOW_REPLACE="$4"; if [ "$ALLOW_REPLACE" = "" ]; then ALLOW_REPLACE=false; fi
+	local ALLOW_OVERRIDE="$5"; if [ "$ALLOW_OVERRIDE" = "" ]; then ALLOW_OVERRIDE=false; fi
+
+	kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
+
+	rm -rf "$TMP/kernelsource"
+	if kernelseeds_option_is_set "$KERNEL_SOURCE_PATH/.config" "$OPTION"; then
+		if kernelseeds_option_is_set "$KERNEL_SOURCE_PATH/.config" "$OPTION" "$VALUE"; then
+			echo "$OPTION_VALUE is already set"
+			return
+		fi
+		if $ALLOW_REPLACE; then
+			cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+			sed -i -r "s/^$OPTION=.*$/$OPTION_VALUE/" "$TMP/kernelsource/.config"
+		fi
 	else
-		kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
+		cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+		sed -i -r "s/^# $OPTION is not set$/$OPTION_VALUE/" "$TMP/kernelsource/.config"
+	fi
+	make -C "$TMP/kernelsource" olddefconfig > "$TMP/kernelseeds-make-olddefconfig" 2>&1
+
+	if [ $? -ne 0 ]; then
+		echo "$OPTION_VALUE skipped due to error during \"make olddefconfig\""
+		return 1
+	fi
+	if ! $ALLOW_OVERRIDE && grep -q override "$TMP/kernelseeds-make-olddefconfig"; then
+		echo "$OPTION_VALUE skipped due to override during \"make olddefconfig\""
+		return 2
+	fi
+	if $TEST && ! kernelseeds_quiet make -C "$TMP/kernelsource" -j "$THREADS"; then
+		echo "$OPTION_VALUE skipped due to error during kernel build test"
+		return 3
+	fi
+	if kernelseeds_option_is_set "$TMP/kernelsource/.config" "$OPTION" "$VALUE"; then
+		echo "$OPTION_VALUE"
+	else
+		echo "$OPTION_VALUE was set but then later reverted by \"make olddefconfig\""
+		return 4
 	fi
 
-	echo -n "Generating list of all possible module options..."
-	rm -rf "$TMP/kernelsource"
-	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
-	pushd "$TMP/kernelsource" > /dev/null
-		kernelseeds_quiet make clean mrproper
-		kernelseeds_quiet make allmodconfig
-		cp .config "$TMP/allmodconfig"
-	popd > /dev/null
-	echo " done."
+	cp -f "$TMP/kernelsource/.config" "$KERNEL_SOURCE_PATH/.config"
+}
 
-	rm -rf "$TMP/kernelsource"
-	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
-
-	pushd "$TMP/kernelsource" > /dev/null
-	cp -f .config .config.enable_all_modules
+# \brief Set all options from $2
+# $1 The kernel source path
+# $2 The seed config file
+# $3 true|false Replace existing values with the new value if the option is already set. Default is false.
+# $4 true|false Allow overrides during "make olddefconfig". Default is false.
+function kernelseeds_set_options
+{
+	local KERNEL_SOURCE_PATH="$1"
+	local SEED_CONFIG="$2"
+	local ALLOW_REPLACE="$3"; if [ "$ALLOW_REPLACE" = "" ]; then ALLOW_REPLACE=false; fi
+	local ALLOW_OVERRIDE="$4"; if [ "$ALLOW_OVERRIDE" = "" ]; then ALLOW_OVERRIDE=false; fi
 	
-	local MODULES_ENABLED=0
-	local MODULES_SKIPPED=0 # due to override
-	local MODULES_PRUNED=0 # enabled but removed by make olddefconfig
-	local MODULES_TOTAL=0
-	
-	while read -r ALLMODCONFIG_LINE; do
-		# only process modules options
-		if echo "$ALLMODCONFIG_LINE" | grep -E -q '^[^#].+=m$'; then
-			OPTION=$(echo -n "$ALLMODCONFIG_LINE" | sed -r 's/=m$//')
-			
-			# backup config
-			mv -f .config .config.enable_all_modules
-			grep -E "^[^#].*" .config.enable_all_modules >.config
-			
-			echo "$OPTION=m" >>.config
-			if make olddefconfig 2>&1 | grep -q override; then
-				# skip this option due to override
-				cp -f .config.enable_all_modules .config
-				#echo "  Skipped: $OPTION"
-				MODULES_SKIPPED=$(($MODULES_SKIPPED+1))
-			else
-				if grep -E -q "$OPTION=m" .config; then
-					# this module was enabled without causing an override
-					echo "$OPTION=m"
-					MODULES_ENABLED=$(($MODULES_ENABLED+1))
-				else
-					# this module was not enabled by make olddefconfig so skip it
-					#echo "  Pruned: $OPTION"
-					MODULES_PRUNED=$(($MODULES_PRUNED+1))
-				fi
-			fi
-			MODULES_TOTAL=$(($MODULES_TOTAL+1))
-			#echo "  Enabled: $MODULES_ENABLED"
-			#echo "  Skipped: $MODULES_SKIPPED"
-			#echo "  Pruned: $MODULES_PRUNED"
-			#echo "  Total: $MODULES_TOTAL"
-		fi
-	done < "$TMP/allmodconfig"
-	popd > /dev/null
-	cp -f "$TMP/kernelsource/.config" "$KERNEL_SOURCE_PATH"
-	
-	echo "Modules enabled: $MODULES_ENABLED"
-	echo "Modules skipped due to override: $MODULES_SKIPPED"
-	echo "Modules pruned (enabled but removed by make olddefconfig): $MODULES_PRUNED"
-	echo "Total number of possible kernel modules: $MODULES_TOTAL"
+	for OPTION_VALUE in $(grep -E "^CONFIG.*=[my]$" "$SEED_CONFIG"); do
+		local OPTION=$(printf "$OPTION_VALUE" | sed -r 's/^(.*)=[my]/\1/')
+		local VALUE=$(printf "$OPTION_VALUE" | sed -r 's/^.*=([my])/\1/')
+		kernelseeds_set_option "$KERNEL_SOURCE_PATH" "$OPTION" "$VALUE" "$ALLOW_REPLACE" "$ALLOW_OVERRIDE"
+	done
 }
 
 function kernelseeds_help
@@ -147,30 +141,46 @@ function kernelseeds_help
 	echo "  -a, --architecture x86"
 	echo "    Change ARCH when configuring the kernel."
 	echo "    Possible architectures are defined at kernel-source/arch/*:"
-	echo "  --apply-seed-path path/to/options"
-	echo "    Apply the options at the provided path."
-	echo "  --apply-system-raspberry-pi-2"
-	echo "    Apply changes to support the Raspberry Pi 2."
 	echo "  --enable-all-menuconfig"
 	echo "    Enable all menu options which unhide additional options."
 	echo "  --enable-all-modules"
-	echo "    Enable all non-overriding modules."
+	echo "    Enable all modules. Overrides are disabled by default."
+	echo "  --set-active-yes"
+	echo "    Scan this system and set active kernel options to yes."
+	echo "  --set-common"
+	echo "    Set common options."
+	echo "  --set-options seed.config"
+	echo "    Set all options from seed.config. Overrides are disabled by default."
+	echo "  --set-raspberry-pi-2"
+	echo "    Set options for Raspberry Pi 2 support."
 	echo "  -h, --help"
 	echo "    Display this help message and exit."
+	echo "  --override-enable"
+	echo "    Set options that would override existing options. Disabled by default."
+	echo "  --override-disable"
+	echo "    Do not override existing options. Disabled by default."
+	echo "  --test-enable"
+	echo "    Enable kernel build testing for every changed kernel option."
+	echo "  --test-disable"
+	echo "    Disable kernel build testing for every changed kernel option."
 	echo "  --tmpfs"
-	echo "    Use tmpfs to improve performance of /tmp."
+	echo "    Use tmpfs to improve performance."
 	echo
-	echo "Example:"
+	echo "Example: Enable all possible modules:"
 	echo "  # cd /usr/src/linux"
-	echo "  # make clean mrproper"
+	echo "  # kernelseeds --enable-all-menuconfig --enable-all-modules"
+	echo "  # make && make modules_install"
+	echo
+	echo "Example: Enable all possible modules with an existing distribution kernel:"
+	echo "  # cd /usr/src/linux"
+	echo "  # modprobe configs"
 	echo "  # gzip -c -d /proc/config.gz > .config"
 	echo "  # kernelseeds --enable-all-menuconfig --enable-all-modules"
 	echo "  # make && make modules_install"
 	echo
-	echo "Example:"
-	echo "  # cd /usr/src/linux-arm"
-	echo "  # make clean mrproper"
-	echo "  # kernelseeds -a arm --enable-all-menuconfig --enable-all-modules"
+	echo "Example: Scan this system and set active drivers and modules to builtin:"
+	echo "  # cd /usr/src/linux"
+	echo "  # kernelseeds --set-active-yes"
 	echo "  # make && make modules_install"
 	echo
 	echo "Version:"
@@ -180,12 +190,18 @@ function kernelseeds_help
 }
 
 # \brief Return true if a kernel option is set
+# $1 The kernel .config file
 # $2 The kernel option
-# $1 The .config file
+# $3 The kernel option value (only return true if this optional value is matched)
 function kernelseeds_option_is_set
 {
-	grep -E -q "^$1=.*$" "$2"
-	return $?
+	if [ "$3" = "" ]; then
+		grep -E -q "^$2=.*$" "$1"
+		return $?
+	else
+		grep -E -q "^$2=$3$" "$1"
+		return $?
+	fi
 }
 
 # \brief Run a command and only show output if an error occurs
@@ -202,17 +218,381 @@ function kernelseeds_quiet
 	return "$STATUS"
 }
 
+# \brief Scan the running kernel and set active options to yes.
+# $1 The kernel source path
+function kernelseeds_set_active_yes
+{
+	local KERNEL_SOURCE_PATH="$1"
+	
+	kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
+	
+	LSMOD_MODULES=$(cut -d ' ' -f 1 /proc/modules | sort | uniq) # this works, but "kvm" matches too many CONFIG_ options
+	LSPCI_DRIVERS=$(lspci -v | grep "Kernel driver" | sed -r -e 's/.*: (.*)/\1/' | sort | uniq)
+	LSPCI_MODULES=$(lspci -v | grep "Kernel modules" | sed -r -e 's/.*: (.*)/\1/' | sed -r -e 's/, /\n/g' | sort | uniq)
+	# some modules use '-' and some use '_' in the name, so convert - to _
+	ALL=$(for S in $LSMOD_MODULES $LSPCI_DRIVERS $LSPCI_MODULES; do printf "$S\n"; done | tr - _ | sort | uniq)
+	
+	local OPTIONS=""
+	for S in $ALL; do
+		# some modules use '-' and some use '_' in the name, so search for both
+		SS=$(printf "$S" | sed -r -e 's/[-_]/[-_]/g')
+		# search all Makefile files for matching .o then output only the CONFIG_ string
+		OPTION=$(find "$KERNEL_SOURCE_PATH" -name Makefile -exec grep -e "^obj.* $SS\\.o" '{}' \; | grep -E -o 'CONFIG_[A-Z0-9_]+')
+		if [ "$OPTION" = "" ]; then
+			printf "error: no kernel options found for \"$S\"\n" > /dev/stderr
+			continue
+		fi
+		if [ $(printf "$OPTION\n" | tr -s '\n' | wc -l) -ne 1 ]; then
+			printf "error: more than one kernel option was found for \"$S\": " > /dev/stderr
+			printf "$OPTION" | tr -s '\n' ' ' > /dev/stderr
+			printf '\n'
+			continue
+		fi
+		OPTIONS="$OPTIONS\n$OPTION"
+	done
+	OPTIONS=$(printf "$OPTIONS" | sort | uniq)
+	for S in $OPTIONS; do
+		kernelseeds_set_option "$KERNEL_SOURCE_PATH" "$S" y true
+	done
+}
+
+# Set common options
+# $1 The kernel source path
+function kernelseeds_set_common
+{
+	local KERNEL_SOURCE_PATH="$1"
+	
+	kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
+	
+	echo 'Set common options'
+	
+	rm -rf "$TMP/kernelsource"
+	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+	pushd "$TMP/kernelsource" > /dev/null
+	
+	echo 'Enable /proc/config.gz'
+	echo 'CONFIG_IKCONFIG=m' | tee -a .config
+	echo 'CONFIG_IKCONFIG_PROC=y' | tee -a .config
+	
+	echo 'Enable UEFI Support'
+	#echo 'CONFIG_RELOCATABLE=y' | tee -a .config
+	echo 'CONFIG_EFI=y' | tee -a .config
+	echo 'CONFIG_EFI_STUB=y' | tee -a .config
+	echo 'CONFIG_EFI_MIXED=n' | tee -a .config
+	#echo 'CONFIG_X86_SYSFB=y' | tee -a .config
+	#echo 'CONFIG_FB_SIMPLE=y' | tee -a .config
+	echo 'CONFIG_EFIVAR_FS=m' | tee -a .config
+
+	echo 'Set the timer frequency to 1000Hz'
+	echo 'CONFIG_HZ_1000=y' | tee -a .config
+
+	echo 'Enable Graphics Support'
+	echo 'CONFIG_FB=y' | tee -a .config
+	echo 'CONFIG_FRAMEBUFFER_CONSOLE=y' | tee -a .config
+	echo 'CONFIG_DRM=y' | tee -a .config
+	echo 'CONFIG_DRM_AMDGPU=m' | tee -a .config
+	echo 'CONFIG_DRM_CIRRUS_QEMU=m' | tee -a .config
+	echo 'CONFIG_DRM_I915=m' | tee -a .config
+	echo 'CONFIG_DRM_QXL=m' | tee -a .config
+	echo 'CONFIG_DRM_RADEON=m' | tee -a .config
+	echo 'CONFIG_DRM_UDL=m' | tee -a .config
+	echo 'CONFIG_DRM_VBOXVIDEO=m' | tee -a .config
+	echo 'CONFIG_DRM_VIRTIO_GPU=m' | tee -a .config
+	echo 'CONFIG_DRM_VMWGFX=y' | tee -a .config
+	echo 'CONFIG_DRM_VMWGFX_FBCON=y' | tee -a .config
+	#echo 'CONFIG_DRM_SIMPLEDRM=y' | tee -a .config
+	#echo 'CONFIG_SYSFB_SIMPLEFB=y' | tee -a .config
+
+	echo 'Enable SATA support'
+	echo 'CONFIG_SATA_AHCI=y' | tee -a .config
+	echo 'CONFIG_SATA_MV=y' | tee -a .config
+	echo 'CONFIG_SATA_NV=y' | tee -a .config
+	echo 'CONFIG_SATA_PROMISE=y' | tee -a .config
+	echo 'CONFIG_SATA_SIL=y' | tee -a .config
+	echo 'CONFIG_SATA_SIS=y' | tee -a .config
+	echo 'CONFIG_SATA_SVW=y' | tee -a .config
+	echo 'CONFIG_SATA_ULI=y' | tee -a .config
+	echo 'CONFIG_SATA_VIA=y' | tee -a .config
+	echo 'CONFIG_SATA_VITESSE=y' | tee -a .config
+
+	echo 'Enable SCSI support'
+	echo 'CONFIG_SCSI_MVSAS=y' | tee -a .config
+	echo 'CONFIG_SCSI_MVSAS_TASKLET=y' | tee -a .config
+	echo 'CONFIG_SCSI_SAS_ATA=y' | tee -a .config
+	echo 'CONFIG_SCSI_SAS_LIBSAS=y' | tee -a .config
+
+	echo 'Enable NVMe support'
+	echo 'CONFIG_BLK_DEV_NVME=y' | tee -a .config
+
+	echo 'Enable Advanced Partition Support'
+	echo 'CONFIG_BLOCK=y' | tee -a .config
+	echo 'CONFIG_PARTITION_ADVANCED=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION_CUMANA=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION_EESOX=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION_ICS=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION_ADFS=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION_POWERTEC=y' | tee -a .config
+	echo 'CONFIG_ACORN_PARTITION_RISCIX=y' | tee -a .config
+	echo 'CONFIG_AIX_PARTITION=y' | tee -a .config
+	echo 'CONFIG_OSF_PARTITION=y' | tee -a .config
+	echo 'CONFIG_AMIGA_PARTITION=y' | tee -a .config
+	echo 'CONFIG_ATARI_PARTITION=y' | tee -a .config
+	echo 'CONFIG_MAC_PARTITION=y' | tee -a .config
+	echo 'CONFIG_BSD_DISKLABEL=y' | tee -a .config
+	echo 'CONFIG_MINIX_SUBPARTITION=y' | tee -a .config
+	echo 'CONFIG_SOLARIS_X86_PARTITION=y' | tee -a .config
+	echo 'CONFIG_UNIXWARE_DISKLABEL=y' | tee -a .config
+	echo 'CONFIG_LDM_PARTITION=y' | tee -a .config
+	echo 'CONFIG_SGI_PARTITION=y' | tee -a .config
+	echo 'CONFIG_ULTRIX_PARTITION=y' | tee -a .config
+	echo 'CONFIG_SUN_PARTITION=y' | tee -a .config
+	echo 'CONFIG_KARMA_PARTITION=y' | tee -a .config
+	echo 'CONFIG_SYSV68_PARTITION=y' | tee -a .config
+	echo 'CONFIG_CMDLINE_PARTITION=y' | tee -a .config
+
+	echo 'Enable Ext Support'
+	echo 'CONFIG_EXT2_FS=m' | tee -a .config
+	echo 'CONFIG_EXT2_FS_XATTR=y' | tee -a .config
+	echo 'CONFIG_EXT2_FS_POSIX_ACL=y' | tee -a .config
+	echo 'CONFIG_EXT2_FS_SECURITY=y' | tee -a .config
+	echo 'CONFIG_EXT3_FS=m' | tee -a .config
+	echo 'CONFIG_EXT3_FS_POSIX_ACL=y' | tee -a .config
+	echo 'CONFIG_EXT3_FS_SECURITY=y' | tee -a .config
+	echo 'CONFIG_EXT4_FS=y' | tee -a .config
+	echo 'CONFIG_EXT4_FS_POSIX_ACL=y' | tee -a .config
+	echo 'CONFIG_EXT4_FS_SECURITY=y' | tee -a .config
+
+	echo 'Enable XFS Support'
+	echo 'CONFIG_XFS_FS=m' | tee -a .config
+	echo 'CONFIG_XFS_SUPPORT_V4=y' | tee -a .config
+	echo 'CONFIG_XFS_QUOTA=y' | tee -a .config
+	echo 'CONFIG_XFS_POSIX_ACL=y' | tee -a .config
+	echo 'CONFIG_XFS_RT=y' | tee -a .config
+
+	echo 'Enable Btrfs Support'
+	echo 'CONFIG_BTRFS_FS=m' | tee -a .config
+	echo 'CONFIG_BTRFS_FS_POSIX_ACL=y' | tee -a .config
+
+	echo 'Enable iptables support'
+	echo 'CONFIG_NETFILTER=y' | tee -a .config
+	echo 'CONFIG_IP_NF_FILTER=m' | tee -a .config
+	echo 'CONFIG_IP_NF_NAT=m' | tee -a .config
+	echo 'CONFIG_IP_NF_TARGET_MASQUERADE=m' | tee -a .config
+	echo 'CONFIG_IP_NF_TARGET_NETMAP=m' | tee -a .config
+	echo 'CONFIG_IP_NF_TARGET_REDIRECT=m' | tee -a .config
+
+	echo 'Enable Networking support'
+	echo 'CONFIG_NET=y' | tee -a .config
+	echo 'CONFIG_INET=y' | tee -a .config
+	echo 'CONFIG_IP_PNP=y' | tee -a .config
+	echo 'CONFIG_IP_PNP_DHCP=y' | tee -a .config
+	echo 'CONFIG_NETDEVICES=y' | tee -a .config
+	echo 'CONFIG_ETHERNET=y' | tee -a .config
+	echo 'CONFIG_NET_VENDOR_INTEL=y' | tee -a .config
+	echo 'CONFIG_E100=y' | tee -a .config
+	echo 'CONFIG_E1000=y' | tee -a .config
+	echo 'CONFIG_E1000E=y' | tee -a .config
+	echo 'CONFIG_VMXNET3=y' | tee -a .config
+
+	echo 'Enable NFS support'
+	echo 'CONFIG_NETWORK_FILESYSTEMS=y' | tee -a .config
+	echo 'CONFIG_NFS_FS=y' | tee -a .config
+	echo 'CONFIG_NFS_V2=y' | tee -a .config
+	echo 'CONFIG_NFS_V3=y' | tee -a .config
+	echo 'CONFIG_NFS_V3_ACL=y' | tee -a .config
+	echo 'CONFIG_NFS_V4=y' | tee -a .config
+	echo 'CONFIG_NFS_SWAP=y' | tee -a .config
+	echo 'CONFIG_NFS_V4_1=y' | tee -a .config
+	echo 'CONFIG_NFS_V4_2=y' | tee -a .config
+	echo 'CONFIG_NFS_V4_1_MIGRATION=y' | tee -a .config
+	echo 'CONFIG_ROOT_NFS=y' | tee -a .config
+	echo 'CONFIG_NFSD=m' | tee -a .config
+	echo 'CONFIG_NFSD_V3=y' | tee -a .config
+	echo 'CONFIG_NFSD_V3_ACL=y' | tee -a .config
+	echo 'CONFIG_NFSD_V4=y' | tee -a .config
+	echo 'CONFIG_NFSD_BLOCKLAYOUT=y' | tee -a .config
+	echo 'CONFIG_NFSD_SCSILAYOUT=y' | tee -a .config
+	echo 'CONFIG_NFSD_FLEXFILELAYOUT=y' | tee -a .config
+	echo 'CONFIG_NFSD_V4_SECURITY_LABEL=y' | tee -a .config
+
+	echo 'Enable SMB Support'
+	echo 'CONFIG_NETWORK_FILESYSTEMS=y' | tee -a .config
+	echo 'CONFIG_CIFS=m' | tee -a .config
+	echo 'CONFIG_CIFS_ALLOW_INSECURE_LEGACY=y' | tee -a .config
+	echo 'CONFIG_CIFS_WEAK_PW_HASH=y' | tee -a .config
+	echo 'CONFIG_CIFS_UPCALL=y' | tee -a .config
+	echo 'CONFIG_CIFS_XATTR=y' | tee -a .config
+	echo 'CONFIG_CIFS_POSIX=y' | tee -a .config
+	echo 'CONFIG_CIFS_DFS_UPCALL=y' | tee -a .config
+	echo 'CONFIG_CIFS_SMB_DIRECT=y' | tee -a .config
+	echo 'CONFIG_CIFS_FSCACHE=y' | tee -a .config
+
+	echo 'Enable RAID support'
+	echo 'CONFIG_BLK_DEV_MD=y' | tee -a .config
+	echo 'CONFIG_MD_LINEAR=y' | tee -a .config
+	echo 'CONFIG_MD_RAID0=y' | tee -a .config
+	echo 'CONFIG_MD_RAID1=y' | tee -a .config
+	echo 'CONFIG_MD_RAID10=y' | tee -a .config
+	echo 'CONFIG_MD_RAID456=y' | tee -a .config
+
+	echo 'Enable USB support'
+	echo 'CONFIG_USB=y' | tee -a .config
+	echo 'CONFIG_USB_PCI=y' | tee -a .config
+	echo 'CONFIG_USB_SUPPORT=y' | tee -a .config
+	echo 'CONFIG_USB_XHCI_HCD=y' | tee -a .config
+	echo 'CONFIG_USB_XHCI_PCI=y' | tee -a .config
+	echo 'CONFIG_USB_XHCI_PCI_RENESAS=y' | tee -a .config
+	echo 'CONFIG_USB_EHCI_HCD=y' | tee -a .config
+	echo 'CONFIG_USB_OHCI_HCD=y' | tee -a .config
+	echo 'CONFIG_USB_OHCI_HCD_PCI=y' | tee -a .config
+	echo 'CONFIG_USB_UHCI_HCD=y' | tee -a .config
+
+	echo 'Enable USB Storage Support'
+	echo 'CONFIG_USB_STORAGE=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_ALAUDA=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_CYPRESS_ATACB=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_DATAFAB=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_ENE_UB6250=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_FREECOM=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_ISD200=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_JUMPSHOT=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_KARMA=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_ONETOUCH=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_REALTEK=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_SDDR09=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_SDDR55=y' | tee -a .config
+	echo 'CONFIG_USB_STORAGE_USBAT=y' | tee -a .config
+
+	echo 'Enable VirtIO support'
+	echo 'CONFIG_REMOTEPROC=y' | tee -a .config
+	echo 'CONFIG_VIRTIO_PCI=y' | tee -a .config
+	echo 'CONFIG_VIRTIO_BLK=y' | tee -a .config
+	echo 'CONFIG_SCSI_VIRTIO=y' | tee -a .config
+	echo 'CONFIG_VIRTIO_NET=y' | tee -a .config
+	echo 'CONFIG_HW_RANDOM_VIRTIO=y' | tee -a .config
+
+	echo 'Enable audio over HDMI support'
+	echo 'CONFIG_SND_HDA_INTEL=y' | tee -a .config
+	echo 'CONFIG_SND_HDA_CODEC_HDMI=y' | tee -a .config
+	echo 'CONFIG_SND_HDA_GENERIC=y' | tee -a .config
+
+	echo 'Enable VMware support'
+	echo 'CONFIG_VMWARE_PVSCSI=y' | tee -a .config
+	echo 'CONFIG_SCSI_MPT2SAS=y' | tee -a .config
+	echo 'CONFIG_SCSI_MPT3SAS=y' | tee -a .config
+	echo 'CONFIG_VMWARE_VMCI_VSOCKETS=m' | tee -a .config
+
+	echo 'A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver'
+	echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' | tee -a .config
+
+	echo 'Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)'
+	echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' | tee -a .config
+
+	echo 'Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))'
+	echo 'CONFIG_PREEMPT=y' | tee -a .config
+
+	echo 'Enable Control Group support'
+	echo 'CONFIG_CGROUPS=y' | tee -a .config
+	echo 'CONFIG_CGROUP_FREEZER=y' | tee -a .config
+	echo 'CONFIG_CGROUP_PIDS=y' | tee -a .config
+	echo 'CONFIG_CGROUP_DEVICE=y' | tee -a .config
+	echo 'CONFIG_CPUSETS=y' | tee -a .config
+	echo 'CONFIG_CGROUP_CPUACCT=y' | tee -a .config
+	echo 'CONFIG_MEMCG=y' | tee -a .config
+	echo 'CONFIG_MEMCG_SWAP=y' | tee -a .config
+	echo 'CONFIG_MEMCG_KMEM=y' | tee -a .config
+	echo 'CONFIG_CGROUP_HUGETLB=y' | tee -a .config
+	echo 'CONFIG_CGROUP_PERF=y' | tee -a .config
+	echo 'CONFIG_CGROUP_SCHED=y' | tee -a .config
+	echo 'CONFIG_FAIR_GROUP_SCHED=y' | tee -a .config
+	echo 'CONFIG_CFS_BANDWIDTH=y' | tee -a .config
+	echo 'CONFIG_BLK_CGROUP=y' | tee -a .config
+
+	echo 'dev-libs/ell and sys-apps/keyutils require CONFIG_KEY_DH_OPERATIONS'
+	echo 'CONFIG_KEY_DH_OPERATIONS=y' | tee -a .config
+	echo 'media-libs/mesa requires CONFIG_CHECKPOINT_RESTORE'
+	echo 'CONFIG_CHECKPOINT_RESTORE=y' | tee -a .config
+	echo 'www-client/google-chrome requires CONFIG_USER_NS'
+	echo 'CONFIG_USER_NS=y' | tee -a .config
+
+	echo 'Clear system-wide ring of truted keys and revocation certificates'
+	echo 'CONFIG_SYSTEM_TRUSTED_KEYS=""';
+	sed -i -r 's/^CONFIG_SYSTEM_TRUSTED_KEYS=".*"$/CONFIG_SYSTEM_TRUSTED_KEYS=""/' .config
+	echo 'CONFIG_SYSTEM_REVOCATION_KEYS=""';
+	sed -i -r 's/^CONFIG_SYSTEM_REVOCATION_KEYS=".*"$/CONFIG_SYSTEM_REVOCATION_KEYS=""/' .config
+
+	echo 'Disable SELinux'
+	echo 'CONFIG_SECURITY_SELINUX=n' | tee -a .config
+	echo 'Disable USB Attached SCSI since it is broken for seagate drives'
+	echo 'CONFIG_USB_UAS=n' | tee -a .config
+	echo 'Disable debug info because it requires pahole at kernel compile time'
+	echo 'CONFIG_DEBUG_INFO=n' | tee -a .config
+	echo 'CONFIG_DEBUG_INFO_BTF=n' | tee -a .config
+	echo 'Disable "Stack utilization instrumentation" because it floods "used greatest stack depth" to system log'
+	echo 'CONFIG_DEBUG_STACK_USAGE=n' | tee -a .config
+	echo 'Disable "Event debugging" because it is autoloaded and floods the system log'
+	echo 'CONFIG_INPUT_EVBUG=n' | tee -a .config
+	
+	kernelseeds_quiet make olddefconfig
+	
+	popd > /dev/null
+	cp -f "$TMP/kernelsource/.config" "$KERNEL_SOURCE_PATH/.config"
+}
+
+# Set options for Raspberry Pi 2 support
+# $1 The kernel source path
+function kernelseeds_set_raspberry_pi_2
+{
+	local KERNEL_SOURCE_PATH="$1"
+
+	echo 'Set options for Raspberry Pi 2 support'
+
+	rm -rf "$TMP/kernelsource"
+	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+	pushd "$TMP/kernelsource" > /dev/null
+
+	echo 'Build in SD card support to enable booting off of SD cards'
+	echo 'CONFIG_MMC=y' | tee -a .config
+	echo 'CONFIG_MMC_BLOCK=y' | tee -a .config
+
+	echo 'Build in support for the Raspberry Pi SD/MMC controller'
+	echo 'CONFIG_MMC_SDHCI=y' | tee -a .config
+	echo 'MMC_SDHCI_PLTFM=y' | tee -a .config
+	echo 'MMC_SDHCI_BCM2835=y' | tee -a .config
+
+	echo 'Build in support for the Raspberry Pi GPU'
+	echo 'CONFIG_FB=y' | tee -a .config
+	echo 'CONFIG_FB_BCM2708=y' | tee -a .config
+	echo 'CONFIG_FRAMEBUFFER_CONSOLE=y' | tee -a .config
+
+	echo 'Enable support for 3D acceleration'
+	echo 'Note: This driver requires that "avoid_warnings=2" be present in the config.txt for the firmware, to keep it from smashing the display setup.'
+	echo 'CONFIG_DRM=m' | tee -a .config
+	echo 'CONFIG_DRM_VC4=m' | tee -a .config
+
+	echo 'Build in support for the Raspberry Pi Ethernet Chipset'
+	echo 'CONFIG_USB_NET_SMSC95XX=y' | tee -a .config
+
+	echo 'Disable seccomp due to compile error: "gcc: error: unrecognized command line option ‘-m32’; did you mean ‘-mbe32’?"'
+	echo 'CONFIG_SECCOMP=n' | tee -a .config
+
+	kernelseeds_quiet make olddefconfig
+
+	popd > /dev/null
+	cp -f "$TMP/kernelsource/.config" "$KERNEL_SOURCE_PATH/.config"
+}
+
 #------------------------------------------------------------------------------
 # default configuration
 
 KERNEL_SOURCE_PATH=.
-ALL_MENUCONFIG=false
-ALL_MODULES=false
-SEED_PATH=""
-APPLY_SYSTEM_RASPBERRY_PI_2=false
-OVERRIDE=true
+OVERRIDE=false
+REPLACE=false
+TEST=false
+TMP="/tmp/$CODENAME.$$"; mkdir -m 0700 -p "$TMP"
 TMPFS=false
-TMP="/tmp"
+THREADS=$(grep -c processor /proc/cpuinfo)
 
 #------------------------------------------------------------------------------
 # command line arguments
@@ -223,28 +603,71 @@ while [ $# -gt 0 ]; do
 			export ARCH="$2"
 			shift 2
 			;;
-		"--apply-system-raspberry-pi-2")
-			APPLY_SYSTEM_RASPBERRY_PI_2=true
-			shift
-			;;
-		"--apply-seed-path")
-			SEED_PATH="$2"
-			shift 2
-			;;
 		"--enable-all-menuconfig")
-			ALL_MENUCONFIG=true
+			kernelseeds_enable_all_menuconfig "$KERNEL_SOURCE_PATH"
 			shift
 			;;
 		"--enable-all-modules")
-			ALL_MODULES=true
+			kernelseeds_enable_all_modules "$KERNEL_SOURCE_PATH"
 			shift
 			;;
 		"-h"|"--help")
 			kernelseeds_help
 			exit
 			;;
+		"--override-disable")
+			OVERRIDE=false
+			shift
+			;;
+		"--override-enable")
+			OVERRIDE=true
+			shift
+			;;
+		"--replace-disable")
+			REPLACE=false
+			shift
+			;;
+		"--replace-enable")
+			REPLACE=true
+			shift
+			;;
+		"--set-active-yes")
+			kernelseeds_set_active_yes "$KERNEL_SOURCE_PATH"
+			shift
+			;;
+		"--set-common")
+			kernelseeds_set_common "$KERNEL_SOURCE_PATH"
+			shift
+			;;
+		"--set-options")
+			kernelseeds_set_options "$KERNEL_SOURCE_PATH" "$2" "$REPLACE" "$OVERRIDE"
+			shift 2
+			;;
+		"--set-raspberry-pi-2")
+			kernelseeds_set_raspberry_pi_2 "$KERNEL_SOURCE_PATH"
+			shift
+			;;
+		"--test-disable")
+			TEST=false
+			shift
+			;;
+		"--test-enable")
+			TEST=true
+			shift
+			;;
+		"--tmp")
+			TMP="$2"
+			shift 2
+			;;
 		"--tmpfs")
-			TMPFS=true
+			if ! $TMPFS; then
+				mkdir -m 0700 -p "$TMP.tmpfs"
+				mount -t tmpfs none "$TMP.tmpfs"
+				mv -f "$TMP"/* "$TMP.tmpfs" 2> /dev/null
+				rmdir "$TMP"
+				TMP="$TMP.tmpfs"
+				TMPFS=true
+			fi
 			shift
 			;;
 		*)
@@ -261,297 +684,6 @@ if [ ! -f "$KERNEL_SOURCE_PATH/Makefile" ]; then
 	echo "error: the kernel_source_path at \"$KERNEL_SOURCE_PATH\" does not appear to contain a kernel Makefile"
 	exit 3
 fi
-
-#------------------------------------------------------------------------------
-# prepare environment
-
-TMP="$TMP/$CODENAME.$$"
-mkdir -m 0700 -p "$TMP"
-if $TMPFS; then
-	mount -t tmpfs none "$TMP"
-fi
-
-#------------------------------------------------------------------------------
-# begin execution
-
-if [ ! -f .config ]; then
-	echo -n "An existing .config file was not found. Generating a new default config..."
-	kernelseeds_quiet make defconfig
-	echo " done."
-fi
-
-if $ALL_MENUCONFIG; then
-	kernelseeds_enable_all_menuconfig "$KERNEL_SOURCE_PATH"
-fi
-
-if [ "$SEED_PATH" != "" ]; then
-	kernelseeds_apply_seed_path "$KERNEL_SOURCE_PATH" "$SEED_PATH"
-fi
-
-if $ALL_MODULES; then
-	kernelseeds_enable_all_modules "$KERNEL_SOURCE_PATH"
-fi
-
-if $APPLY_SYSTEM_RASPBERRY_PI_2; then
-	echo "Build in SD card support to enable booting off of SD cards"
-	echo "  Device Drivers > MMC/SD/SDIO card support"
-	echo 'CONFIG_MMC=y' >>.config
-	echo "  Device Drivers > MMC/SD/SDIO card support > MMC block device driver"
-	echo 'CONFIG_MMC_BLOCK=y' >>.config
-
-	echo "Build in support for the Raspberry Pi SD/MMC controller"
-	echo "  Device Drivers > MMC/SD/SDIO card support > Secure Digital Host Controller Interface support"
-	echo 'CONFIG_MMC_SDHCI=y' >>.config
-	echo "  Device Drivers > MMC/SD/SDIO card support > SDHCI platform and OF driver helper"
-	echo 'MMC_SDHCI_PLTFM=y' >>.config
-	echo "  Device Drivers > MMC/SD/SDIO card support > SDHCI platform support for the BCM2835 SD/MMC Controller"
-	echo 'MMC_SDHCI_BCM2835=y' >>.config
-
-	echo "Build in support for the Raspberry Pi GPU"
-	echo "  Devices Drivers > Graphics support > Frame buffer Devices > Support for frame buffer devices"
-	echo 'CONFIG_FB=y' >>.config
-	echo "  Devices Drivers > Graphics support > Frame buffer Devices > Support for frame buffer devices > BCM2708 framebuffer support"
-	echo 'CONFIG_FB_BCM2708=y' >>.config
-	echo "  Devices Drivers > Graphics support > Console display driver support"
-	echo 'CONFIG_FRAMEBUFFER_CONSOLE=y' >>.config
-
-	echo "Enable support for 3D acceleration"
-	echo "  Devices Drivers > Graphics support > Direct Rendering Manager (XFree86 4.1.0 and higher DRI support)"
-	echo 'CONFIG_DRM=m' >>.config
-	echo "  Devices Drivers > Graphics support > Broadcom VC4 Graphics"
-	echo 'CONFIG_DRM_VC4=m' >>.config
-	echo "Note: This driver requires that \"avoid_warnings=2\" be present in the config.txt for the firmware, to keep it from smashing the display setup."
-
-	echo "Build in support for the Raspberry Pi Ethernet Chipset"
-	echo "  Device Drivers > Network device support > USB Network Adapters > Multi-purpose USB Networking Framework > SMSC LAN95XX based USB 2.0 10/100 ethernet devices"
-	echo 'CONFIG_USB_NET_SMSC95XX=y' >>.config
-
-	echo "Disable seccomp due to compile error: \"gcc: error: unrecognized command line option ‘-m32’; did you mean ‘-mbe32’?\""
-	echo "  Kernel Features             > Enable seccomp to safely compute untrusted bytecode"
-	echo "  Processor type and features > Enable seccomp to safely compute untrusted bytecode"
-	echo 'CONFIG_SECCOMP=n' >>.config
-
-	kernelseeds_quiet make olddefconfig
-fi
-
-echo "Enable EFI Stub Support"
-printf "  "; printf "CONFIG_EFI=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EFI_STUB=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EFI_MIXED=n\n" | tee -a .config
-
-echo "Enable Framebuffer Support"
-printf "  "; printf "CONFIG_FB=y\n" | tee -a .config
-printf "  "; printf "CONFIG_FRAMEBUFFER_CONSOLE=y\n" | tee -a .config
-
-echo "Enable Advanced Partition Support"
-printf "  "; printf "CONFIG_BLOCK=y\n" | tee -a .config
-printf "  "; printf "CONFIG_PARTITION_ADVANCED=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION_CUMANA=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION_EESOX=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION_ICS=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION_ADFS=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION_POWERTEC=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ACORN_PARTITION_RISCIX=y\n" | tee -a .config
-printf "  "; printf "CONFIG_AIX_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_OSF_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_AMIGA_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ATARI_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_MAC_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_BSD_DISKLABEL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_MINIX_SUBPARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_SOLARIS_X86_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_UNIXWARE_DISKLABEL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_LDM_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_SGI_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_ULTRIX_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_SUN_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_KARMA_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_SYSV68_PARTITION=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CMDLINE_PARTITION=y\n" | tee -a .config
-
-echo "Enable Ext Support"
-printf "  "; printf "CONFIG_EXT2_FS=m\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT2_FS_XATTR=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT2_FS_POSIX_ACL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT2_FS_SECURITY=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT3_FS=m\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT3_FS_POSIX_ACL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT3_FS_SECURITY=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT4_FS=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT4_FS_POSIX_ACL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_EXT4_FS_SECURITY=y\n" | tee -a .config
-
-echo "Enable XFS Support"
-printf "  "; printf "CONFIG_XFS_FS=m\n" | tee -a .config
-printf "  "; printf "CONFIG_XFS_SUPPORT_V4=y\n" | tee -a .config
-printf "  "; printf "CONFIG_XFS_QUOTA=y\n" | tee -a .config
-printf "  "; printf "CONFIG_XFS_POSIX_ACL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_XFS_RT=y\n" | tee -a .config
-
-echo "Enable Btrfs Support"
-printf "  "; printf "CONFIG_BTRFS_FS=m\n" | tee -a .config
-printf "  "; printf "CONFIG_BTRFS_FS_POSIX_ACL=y\n" | tee -a .config
-
-echo "Enable iptables support"
-echo 'CONFIG_NETFILTER=y' >>.config
-echo 'CONFIG_IP_NF_FILTER=m' >>.config
-echo 'CONFIG_IP_NF_NAT=m' >>.config
-echo 'CONFIG_IP_NF_TARGET_MASQUERADE=m' >>.config
-echo 'CONFIG_IP_NF_TARGET_NETMAP=m' >>.config
-echo 'CONFIG_IP_NF_TARGET_REDIRECT=m' >>.config
-
-echo "Enable NFS support"
-echo 'CONFIG_NETWORK_FILESYSTEMS=y' >>.config
-echo 'CONFIG_NFS_FS=y' >>.config
-echo 'CONFIG_NFS_V2=y' >>.config
-echo 'CONFIG_NFS_V3=y' >>.config
-echo 'CONFIG_NFS_V3_ACL=y' >>.config
-echo 'CONFIG_NFS_V4=y' >>.config
-echo 'CONFIG_NFS_SWAP=y' >>.config
-echo 'CONFIG_NFS_V4_1=y' >>.config
-echo 'CONFIG_NFS_V4_2=y' >>.config
-echo 'CONFIG_NFS_V4_1_MIGRATION=y' >>.config
-echo 'CONFIG_ROOT_NFS=y' >>.config
-echo 'CONFIG_NFSD=m' >>.config
-echo 'CONFIG_NFSD_V3=y' >>.config
-echo 'CONFIG_NFSD_V3_ACL=y' >>.config
-echo 'CONFIG_NFSD_V4=y' >>.config
-echo 'CONFIG_NFSD_BLOCKLAYOUT=y' >>.config
-echo 'CONFIG_NFSD_SCSILAYOUT=y' >>.config
-echo 'CONFIG_NFSD_FLEXFILELAYOUT=y' >>.config
-echo 'CONFIG_NFSD_V4_SECURITY_LABEL=y' >>.config
-
-echo "Enable SMB Support"
-printf "  "; printf "CONFIG_NETWORK_FILESYSTEMS=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS=m\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_ALLOW_INSECURE_LEGACY=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_WEAK_PW_HASH=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_UPCALL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_XATTR=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_POSIX=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_DFS_UPCALL=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_SMB_DIRECT=y\n" | tee -a .config
-printf "  "; printf "CONFIG_CIFS_FSCACHE=y\n" | tee -a .config
-
-echo "Enable NVMe support"
-echo "  Device Drivers > NVME Support > NVM Express block device"
-echo 'CONFIG_BLK_DEV_NVME=y' >>.config
-
-echo "Enable RAID support"
-echo 'CONFIG_BLK_DEV_MD=y' >>.config
-echo 'CONFIG_MD_LINEAR=y' >>.config
-echo 'CONFIG_MD_RAID0=y' >>.config
-echo 'CONFIG_MD_RAID1=y' >>.config
-echo 'CONFIG_MD_RAID10=y' >>.config
-echo 'CONFIG_MD_RAID456=y' >>.config
-
-echo "Enable USB support"
-printf "  "; printf "CONFIG_USB=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_PCI=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_SUPPORT=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_XHCI_HCD=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_XHCI_PCI=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_XHCI_PCI_RENESAS=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_EHCI_HCD=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_OHCI_HCD=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_OHCI_HCD_PCI=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_UHCI_HCD=y\n" | tee -a .config
-
-echo "Enable USB Storage Support"
-printf "  "; printf "CONFIG_USB_STORAGE=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_ALAUDA=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_CYPRESS_ATACB=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_DATAFAB=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_ENE_UB6250=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_FREECOM=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_ISD200=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_JUMPSHOT=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_KARMA=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_ONETOUCH=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_REALTEK=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_SDDR09=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_SDDR55=y\n" | tee -a .config
-printf "  "; printf "CONFIG_USB_STORAGE_USBAT=y\n" | tee -a .config
-
-echo "Enable VirtIO support"
-echo "  Device Drivers > Remoteproc drivers > Support for Remote Processor subsystem"
-echo 'CONFIG_REMOTEPROC=y' >>.config
-echo "  Device Drivers > Virtio drivers > PCI driver for virtio devices"
-echo 'CONFIG_VIRTIO_PCI=y' >>.config
-echo "  Device Drivers > Block devices > Virtio block driver"
-echo 'CONFIG_VIRTIO_BLK=y' >>.config
-echo "  Device Drivers > SCSI device support > SCSI low-level drivers > virtio-scsi support"
-echo 'CONFIG_SCSI_VIRTIO=y' >>.config
-echo "  Device Drivers > Network device support > Network core driver support > Virtio network driver"
-echo 'CONFIG_VIRTIO_NET=y' >>.config
-echo "  Device Drivers > Character devices > Hardware Random Number Generator Core support > VirtIO Random Number Generator support"
-echo 'CONFIG_HW_RANDOM_VIRTIO=y' >>.config
-
-echo "Enable audio over HDMI support"
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > HD Audio PCI (CONFIG_SND_HDA_INTEL=y)"
-echo 'CONFIG_SND_HDA_INTEL=y' >>.config
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Build HDMI/DisplayPort HD-audio codec support (CONFIG_SND_HDA_CODEC_HDMI=y)"
-echo 'CONFIG_SND_HDA_CODEC_HDMI=y' >>.config
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > HD-Audio > Enable generic HD-audio codec parser (CONFIG_SND_HDA_GENERIC=y)"
-echo 'CONFIG_SND_HDA_GENERIC=y' >>.config
-
-echo "Enable VMware support"
-echo "  Device Drivers > SCSI device support > SCSI low-level drivers > VMware PVSCSI driver support (CONFIG_VMWARE_PVSCSI=y)"
-echo 'CONFIG_VMWARE_PVSCSI=y' >>.config
-echo "  Device Drivers > SCSI device support > SCSI low-level drivers > Legacy MPT2SAS config option (CONFIG_SCSI_MPT2SAS=y)"
-echo 'CONFIG_SCSI_MPT2SAS=y' >>.config
-echo "  Device Drivers > SCSI device support > SCSI low-level drivers > LSI MPT Fusion SAS 3.0 & SAS 2.0 Device Driver (CONFIG_SCSI_MPT3SAS=y)"
-echo 'CONFIG_SCSI_MPT3SAS=y' >>.config
-echo "  Device Drivers > Graphics support > DRM driver for VMware Virtual GPU (CONFIG_DRM_VMWGFX=y))"
-echo 'CONFIG_DRM_VMWGFX=y' >>.config
-echo '  Device Drivers > Graphics support > DRM driver for VMware Virtual GPU > Enable framebuffer console under vmwgfx by default (CONFIG_DRM_VMWGFX_FBCON=y)' >>.config
-echo 'CONFIG_DRM_VMWGFX_FBCON=y' >>.config
-echo '  Networking support > Networking options > Virtual Socket protocol (CONFIG_VMWARE_VMCI_VSOCKETS=m)' >>.config
-echo 'CONFIG_VMWARE_VMCI_VSOCKETS=m' >>.config
-
-echo "A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver"
-echo "  Device Drivers > Sound card support > Advanced Linux Sound Architecture > Pre-allocated buffer size for HD-audio driver (CONFIG_SND_HDA_PREALLOC_SIZE=2048)"
-echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' >>.config
-
-echo "Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)"
-echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' >>.config
-
-echo "Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))"
-echo 'CONFIG_PREEMPT=y' >>.config
-
-echo "USB Attached SCSI is broken for seagate drives"
-echo "  Device Drivers > USB support > USB Attached SCSI"
-echo 'CONFIG_USB_UAS=n' >>.config
-
-echo "dev-libs/ell and sys-apps/keyutils require CONFIG_KEY_DH_OPERATIONS"
-echo "  Security options > Enable access key retention support > Diffie-Hellman operations on retained keys"
-echo 'CONFIG_KEY_DH_OPERATIONS=y' >>.config
-echo "media-libs/mesa requires CONFIG_CHECKPOINT_RESTORE"
-echo "  General setup > Checkpoint/restore support"
-echo 'CONFIG_CHECKPOINT_RESTORE=y' >>.config
-echo "www-client/google-chrome requires CONFIG_USER_NS"
-echo "  General setup > Namespaces support > User namespace"
-echo 'CONFIG_USER_NS=y' >>.config
-
-echo "Disable SELinux"
-echo "  Security options > NSA SELinux Support"
-echo 'CONFIG_SECURITY_SELINUX=n' >>.config
-
-echo "Clear system-wide ring of truted keys and revocation certificates"
-printf "  CONFIG_SYSTEM_TRUSTED_KEYS=""\n"; sed -i -r 's/^CONFIG_SYSTEM_TRUSTED_KEYS=".*"$/CONFIG_SYSTEM_TRUSTED_KEYS=""/' .config
-printf "  CONFIG_SYSTEM_REVOCATION_KEYS=""\n"; sed -i -r 's/^CONFIG_SYSTEM_REVOCATION_KEYS=".*"$/CONFIG_SYSTEM_REVOCATION_KEYS=""/' .config
-
-printf "Disable unnecessary debugging features\n"
-printf "  Disable debug info because it requires pahole at kernel compile time\n"
-printf "    "; printf "CONFIG_DEBUG_INFO=n\n" | tee -a .config
-printf "    "; printf "CONFIG_DEBUG_INFO_BTF=n\n" | tee -a .config
-printf "  Writes \"used greatest stack depth\" to system log\n"
-printf "    "; printf "CONFIG_DEBUG_STACK_USAGE=n\n" | tee -a .config
-printf "  Disable evbug because it is autoloaded and floods the system log\n"
-printf "    "; printf "CONFIG_INPUT_EVBUG=n\n" | tee -a .config
-
-kernelseeds_quiet make olddefconfig
 
 unset ARCH
 if $TMPFS; then

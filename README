@@ -1,0 +1,56 @@
+Description:
+  Apply a set of kernel options to a new or existing kernel configuration.
+
+Usage:
+  kernelseeds [options]
+
+Options:
+  -a, --architecture x86
+    Change ARCH when configuring the kernel.
+    Possible architectures are defined at kernel-source/arch/*:
+  --enable-all-menuconfig
+    Enable all menu options which unhide additional options.
+  --enable-all-modules
+    Enable all modules. Overrides are disabled by default.
+  --set-active-yes
+    Scan this system and set active kernel options to yes.
+  --set-common
+    Set common options.
+  --set-options seed.config
+    Set all options from seed.config. Overrides are disabled by default.
+  --set-raspberry-pi-2
+    Set options for Raspberry Pi 2 support.
+  -h, --help
+    Display this help message and exit.
+  --override-enable
+    Set options that would override existing options. Disabled by default.
+  --override-disable
+    Do not override existing options. Disabled by default.
+  --test-enable
+    Enable kernel build testing for every changed kernel option.
+  --test-disable
+    Disable kernel build testing for every changed kernel option.
+  --tmpfs
+    Use tmpfs to improve performance.
+
+Example: Enable all possible modules:
+  # cd /usr/src/linux
+  # kernelseeds --enable-all-menuconfig --enable-all-modules
+  # make && make modules_install
+
+Example: Enable all possible modules with an existing distribution kernel:
+  # cd /usr/src/linux
+  # modprobe configs
+  # gzip -c -d /proc/config.gz > .config
+  # kernelseeds --enable-all-menuconfig --enable-all-modules
+  # make && make modules_install
+
+Example: Scan this system and set active drivers and modules to builtin:
+  # cd /usr/src/linux
+  # kernelseeds --set-active-yes
+  # make && make modules_install
+
+Version:
+  Kernel Seeds 4.0.0.0
+  Copyright (C) 2013 Nathan Shearer
+  Licensed under GNU General Public License 2.0
