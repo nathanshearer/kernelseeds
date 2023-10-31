@@ -47,10 +47,10 @@ Example: Enable all possible modules with an existing distribution kernel:
 
 Example: Scan this system and set active drivers and modules to builtin:
   # cd /usr/src/linux
-  # kernelseeds --set-active-yes
+  # kernelseeds --override-enable --set-active-yes
   # make && make modules_install
 
 Version:
-  Kernel Seeds 4.0.0.0
+  Kernel Seeds 4.0.1.0
   Copyright (C) 2013 Nathan Shearer
   Licensed under GNU General Public License 2.0

@@ -4,7 +4,7 @@ NAME="Kernel Seeds"
 CODENAME="kernelseeds"
 COPYRIGHT="Copyright (C) 2013 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="4.0.0.0"
+VERSION="4.0.1.0"
 
 # The kernel config has menu options which hide or unhide additional options
 # The menuconfig options do not add any code to the kernel
@@ -31,12 +31,12 @@ function kernelseeds_enable_all_modules
 {
 	local KERNEL_SOURCE_PATH="$1"
 	
-	rm -rf "$TMP/kernelsource"
-	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
-	kernelseeds_quiet make -C "$TMP/kernelsource" clean mrproper
-	kernelseeds_quiet make -C "$TMP/kernelsource" allmodconfig
-	grep -E '^[^#].+=m$' "$TMP/kernelsource/.config" > "$TMP/allmod.config"
-	rm -rf "$TMP/kernelsource"
+	rm -rf "$TMP/kernelsource-allmodconfig"
+	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource-allmodconfig"
+	kernelseeds_quiet make -C "$TMP/kernelsource-allmodconfig" clean mrproper
+	kernelseeds_quiet make -C "$TMP/kernelsource-allmodconfig" allmodconfig
+	grep -E '^[^#].+=m$' "$TMP/kernelsource-allmodconfig/.config" > "$TMP/allmod.config"
+	rm -rf "$TMP/kernelsource-allmodconfig"
 	
 	kernelseeds_set_options "$KERNEL_SOURCE_PATH" "$TMP/allmod.config"
 }
@@ -71,35 +71,44 @@ function kernelseeds_set_option
 
 	kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
 
-	rm -rf "$TMP/kernelsource"
 	if kernelseeds_option_is_set "$KERNEL_SOURCE_PATH/.config" "$OPTION"; then
 		if kernelseeds_option_is_set "$KERNEL_SOURCE_PATH/.config" "$OPTION" "$VALUE"; then
 			echo "$OPTION_VALUE is already set"
 			return
 		fi
 		if $ALLOW_REPLACE; then
-			cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+			if [ ! -d "$TMP/kernelsource" ]; then
+				cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+			fi
 			sed -i -r "s/^$OPTION=.*$/$OPTION_VALUE/" "$TMP/kernelsource/.config"
 		fi
 	else
-		cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+		if [ ! -d "$TMP/kernelsource" ]; then
+			cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
+		fi
 		sed -i -r "s/^# $OPTION is not set$/$OPTION_VALUE/" "$TMP/kernelsource/.config"
 	fi
 	make -C "$TMP/kernelsource" olddefconfig > "$TMP/kernelseeds-make-olddefconfig" 2>&1
 
 	if [ $? -ne 0 ]; then
 		echo "$OPTION_VALUE skipped due to error during \"make olddefconfig\""
+		rm -rf "$TMP/kernelsource"
 		return 1
 	fi
 	if ! $ALLOW_OVERRIDE && grep -q override "$TMP/kernelseeds-make-olddefconfig"; then
 		echo "$OPTION_VALUE skipped due to override during \"make olddefconfig\""
+		rm -rf "$TMP/kernelsource"
 		return 2
 	fi
 	if $TEST && ! kernelseeds_quiet make -C "$TMP/kernelsource" -j "$THREADS"; then
 		echo "$OPTION_VALUE skipped due to error during kernel build test"
+		rm -rf "$TMP/kernelsource"
 		return 3
 	fi
 	if kernelseeds_option_is_set "$TMP/kernelsource/.config" "$OPTION" "$VALUE"; then
+		echo "$OPTION_VALUE"
+	elif [ "$VALUE" = "n" ]; then
+		# special case where =n will remove the option rather than leaving CONFIG_OPTION=n in the .config file, so it actually was set
 		echo "$OPTION_VALUE"
 	else
 		echo "$OPTION_VALUE was set but then later reverted by \"make olddefconfig\""
@@ -180,7 +189,7 @@ function kernelseeds_help
 	echo
 	echo "Example: Scan this system and set active drivers and modules to builtin:"
 	echo "  # cd /usr/src/linux"
-	echo "  # kernelseeds --set-active-yes"
+	echo "  # kernelseeds --override-enable --set-active-yes"
 	echo "  # make && make modules_install"
 	echo
 	echo "Version:"
@@ -242,9 +251,9 @@ function kernelseeds_set_active_yes
 			printf "error: no kernel options found for \"$S\"\n" > /dev/stderr
 			continue
 		fi
-		if [ $(printf "$OPTION\n" | tr -s '\n' | wc -l) -ne 1 ]; then
+		if [ $(printf "$OPTION\n" | sort | uniq | tr -s '\n' | wc -l) -ne 1 ]; then
 			printf "error: more than one kernel option was found for \"$S\": " > /dev/stderr
-			printf "$OPTION" | tr -s '\n' ' ' > /dev/stderr
+			printf "$OPTION" | sort | uniq | tr -s '\n' ' ' > /dev/stderr
 			printf '\n'
 			continue
 		fi
@@ -265,256 +274,250 @@ function kernelseeds_set_common
 	kernelseeds_defconfig "$KERNEL_SOURCE_PATH"
 	
 	echo 'Set common options'
-	
-	rm -rf "$TMP/kernelsource"
-	cp -a "$KERNEL_SOURCE_PATH" "$TMP/kernelsource"
-	pushd "$TMP/kernelsource" > /dev/null
-	
+
 	echo 'Enable /proc/config.gz'
-	echo 'CONFIG_IKCONFIG=m' | tee -a .config
-	echo 'CONFIG_IKCONFIG_PROC=y' | tee -a .config
-	
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IKCONFIG m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IKCONFIG_PROC y true true
+
 	echo 'Enable UEFI Support'
-	#echo 'CONFIG_RELOCATABLE=y' | tee -a .config
-	echo 'CONFIG_EFI=y' | tee -a .config
-	echo 'CONFIG_EFI_STUB=y' | tee -a .config
-	echo 'CONFIG_EFI_MIXED=n' | tee -a .config
-	#echo 'CONFIG_X86_SYSFB=y' | tee -a .config
-	#echo 'CONFIG_FB_SIMPLE=y' | tee -a .config
-	echo 'CONFIG_EFIVAR_FS=m' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EFI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EFI_STUB y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EFI_MIXED n true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EFIVAR_FS m true true
 
 	echo 'Set the timer frequency to 1000Hz'
-	echo 'CONFIG_HZ_1000=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_HZ_1000 y true true
 
 	echo 'Enable Graphics Support'
-	echo 'CONFIG_FB=y' | tee -a .config
-	echo 'CONFIG_FRAMEBUFFER_CONSOLE=y' | tee -a .config
-	echo 'CONFIG_DRM=y' | tee -a .config
-	echo 'CONFIG_DRM_AMDGPU=m' | tee -a .config
-	echo 'CONFIG_DRM_CIRRUS_QEMU=m' | tee -a .config
-	echo 'CONFIG_DRM_I915=m' | tee -a .config
-	echo 'CONFIG_DRM_QXL=m' | tee -a .config
-	echo 'CONFIG_DRM_RADEON=m' | tee -a .config
-	echo 'CONFIG_DRM_UDL=m' | tee -a .config
-	echo 'CONFIG_DRM_VBOXVIDEO=m' | tee -a .config
-	echo 'CONFIG_DRM_VIRTIO_GPU=m' | tee -a .config
-	echo 'CONFIG_DRM_VMWGFX=y' | tee -a .config
-	echo 'CONFIG_DRM_VMWGFX_FBCON=y' | tee -a .config
-	#echo 'CONFIG_DRM_SIMPLEDRM=y' | tee -a .config
-	#echo 'CONFIG_SYSFB_SIMPLEFB=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_FB y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_FRAMEBUFFER_CONSOLE y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_AMDGPU m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_CIRRUS_QEMU m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_I915 m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_QXL m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_RADEON m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_UDL m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_VBOXVIDEO m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_VIRTIO_GPU m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_VMWGFX y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_VMWGFX_FBCON y true true
+	#kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DRM_SIMPLEDRM y true true
+	#kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SYSFB_SIMPLEFB y true true
 
 	echo 'Enable SATA support'
-	echo 'CONFIG_SATA_AHCI=y' | tee -a .config
-	echo 'CONFIG_SATA_MV=y' | tee -a .config
-	echo 'CONFIG_SATA_NV=y' | tee -a .config
-	echo 'CONFIG_SATA_PROMISE=y' | tee -a .config
-	echo 'CONFIG_SATA_SIL=y' | tee -a .config
-	echo 'CONFIG_SATA_SIS=y' | tee -a .config
-	echo 'CONFIG_SATA_SVW=y' | tee -a .config
-	echo 'CONFIG_SATA_ULI=y' | tee -a .config
-	echo 'CONFIG_SATA_VIA=y' | tee -a .config
-	echo 'CONFIG_SATA_VITESSE=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_AHCI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_MV y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_NV y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_PROMISE y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_SIL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_SIS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_SVW y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_ULI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_VIA y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SATA_VITESSE y true true
 
 	echo 'Enable SCSI support'
-	echo 'CONFIG_SCSI_MVSAS=y' | tee -a .config
-	echo 'CONFIG_SCSI_MVSAS_TASKLET=y' | tee -a .config
-	echo 'CONFIG_SCSI_SAS_ATA=y' | tee -a .config
-	echo 'CONFIG_SCSI_SAS_LIBSAS=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_MVSAS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_MVSAS_TASKLET y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_SAS_ATA y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_SAS_LIBSAS y true true
 
 	echo 'Enable NVMe support'
-	echo 'CONFIG_BLK_DEV_NVME=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BLK_DEV_NVME y true true
 
 	echo 'Enable Advanced Partition Support'
-	echo 'CONFIG_BLOCK=y' | tee -a .config
-	echo 'CONFIG_PARTITION_ADVANCED=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION_CUMANA=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION_EESOX=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION_ICS=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION_ADFS=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION_POWERTEC=y' | tee -a .config
-	echo 'CONFIG_ACORN_PARTITION_RISCIX=y' | tee -a .config
-	echo 'CONFIG_AIX_PARTITION=y' | tee -a .config
-	echo 'CONFIG_OSF_PARTITION=y' | tee -a .config
-	echo 'CONFIG_AMIGA_PARTITION=y' | tee -a .config
-	echo 'CONFIG_ATARI_PARTITION=y' | tee -a .config
-	echo 'CONFIG_MAC_PARTITION=y' | tee -a .config
-	echo 'CONFIG_BSD_DISKLABEL=y' | tee -a .config
-	echo 'CONFIG_MINIX_SUBPARTITION=y' | tee -a .config
-	echo 'CONFIG_SOLARIS_X86_PARTITION=y' | tee -a .config
-	echo 'CONFIG_UNIXWARE_DISKLABEL=y' | tee -a .config
-	echo 'CONFIG_LDM_PARTITION=y' | tee -a .config
-	echo 'CONFIG_SGI_PARTITION=y' | tee -a .config
-	echo 'CONFIG_ULTRIX_PARTITION=y' | tee -a .config
-	echo 'CONFIG_SUN_PARTITION=y' | tee -a .config
-	echo 'CONFIG_KARMA_PARTITION=y' | tee -a .config
-	echo 'CONFIG_SYSV68_PARTITION=y' | tee -a .config
-	echo 'CONFIG_CMDLINE_PARTITION=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BLOCK y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_PARTITION_ADVANCED y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION_CUMANA y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION_EESOX y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION_ICS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION_ADFS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION_POWERTEC y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ACORN_PARTITION_RISCIX y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_AIX_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_OSF_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_AMIGA_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ATARI_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MAC_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BSD_DISKLABEL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MINIX_SUBPARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SOLARIS_X86_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_UNIXWARE_DISKLABEL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_LDM_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SGI_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ULTRIX_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SUN_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_KARMA_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SYSV68_PARTITION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CMDLINE_PARTITION y true true
 
 	echo 'Enable Ext Support'
-	echo 'CONFIG_EXT2_FS=m' | tee -a .config
-	echo 'CONFIG_EXT2_FS_XATTR=y' | tee -a .config
-	echo 'CONFIG_EXT2_FS_POSIX_ACL=y' | tee -a .config
-	echo 'CONFIG_EXT2_FS_SECURITY=y' | tee -a .config
-	echo 'CONFIG_EXT3_FS=m' | tee -a .config
-	echo 'CONFIG_EXT3_FS_POSIX_ACL=y' | tee -a .config
-	echo 'CONFIG_EXT3_FS_SECURITY=y' | tee -a .config
-	echo 'CONFIG_EXT4_FS=y' | tee -a .config
-	echo 'CONFIG_EXT4_FS_POSIX_ACL=y' | tee -a .config
-	echo 'CONFIG_EXT4_FS_SECURITY=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT2_FS m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT2_FS_XATTR y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT2_FS_POSIX_ACL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT2_FS_SECURITY y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT3_FS m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT3_FS_POSIX_ACL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT3_FS_SECURITY y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT4_FS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT4_FS_POSIX_ACL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_EXT4_FS_SECURITY y true true
 
 	echo 'Enable XFS Support'
-	echo 'CONFIG_XFS_FS=m' | tee -a .config
-	echo 'CONFIG_XFS_SUPPORT_V4=y' | tee -a .config
-	echo 'CONFIG_XFS_QUOTA=y' | tee -a .config
-	echo 'CONFIG_XFS_POSIX_ACL=y' | tee -a .config
-	echo 'CONFIG_XFS_RT=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_XFS_FS m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_XFS_SUPPORT_V4 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_XFS_QUOTA y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_XFS_POSIX_ACL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_XFS_RT y true true
 
 	echo 'Enable Btrfs Support'
-	echo 'CONFIG_BTRFS_FS=m' | tee -a .config
-	echo 'CONFIG_BTRFS_FS_POSIX_ACL=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BTRFS_FS m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BTRFS_FS_POSIX_ACL y true true
 
 	echo 'Enable iptables support'
-	echo 'CONFIG_NETFILTER=y' | tee -a .config
-	echo 'CONFIG_IP_NF_FILTER=m' | tee -a .config
-	echo 'CONFIG_IP_NF_NAT=m' | tee -a .config
-	echo 'CONFIG_IP_NF_TARGET_MASQUERADE=m' | tee -a .config
-	echo 'CONFIG_IP_NF_TARGET_NETMAP=m' | tee -a .config
-	echo 'CONFIG_IP_NF_TARGET_REDIRECT=m' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NETFILTER y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_NF_FILTER m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_NF_NAT m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_NF_TARGET_MASQUERADE m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_NF_TARGET_NETMAP m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_NF_TARGET_REDIRECT m true true
 
 	echo 'Enable Networking support'
-	echo 'CONFIG_NET=y' | tee -a .config
-	echo 'CONFIG_INET=y' | tee -a .config
-	echo 'CONFIG_IP_PNP=y' | tee -a .config
-	echo 'CONFIG_IP_PNP_DHCP=y' | tee -a .config
-	echo 'CONFIG_NETDEVICES=y' | tee -a .config
-	echo 'CONFIG_ETHERNET=y' | tee -a .config
-	echo 'CONFIG_NET_VENDOR_INTEL=y' | tee -a .config
-	echo 'CONFIG_E100=y' | tee -a .config
-	echo 'CONFIG_E1000=y' | tee -a .config
-	echo 'CONFIG_E1000E=y' | tee -a .config
-	echo 'CONFIG_VMXNET3=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NET y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_INET y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_PNP y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_IP_PNP_DHCP y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NETDEVICES y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ETHERNET y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NET_VENDOR_INTEL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_E100 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_E1000 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_E1000E y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_VMXNET3 y true true
 
 	echo 'Enable NFS support'
-	echo 'CONFIG_NETWORK_FILESYSTEMS=y' | tee -a .config
-	echo 'CONFIG_NFS_FS=y' | tee -a .config
-	echo 'CONFIG_NFS_V2=y' | tee -a .config
-	echo 'CONFIG_NFS_V3=y' | tee -a .config
-	echo 'CONFIG_NFS_V3_ACL=y' | tee -a .config
-	echo 'CONFIG_NFS_V4=y' | tee -a .config
-	echo 'CONFIG_NFS_SWAP=y' | tee -a .config
-	echo 'CONFIG_NFS_V4_1=y' | tee -a .config
-	echo 'CONFIG_NFS_V4_2=y' | tee -a .config
-	echo 'CONFIG_NFS_V4_1_MIGRATION=y' | tee -a .config
-	echo 'CONFIG_ROOT_NFS=y' | tee -a .config
-	echo 'CONFIG_NFSD=m' | tee -a .config
-	echo 'CONFIG_NFSD_V3=y' | tee -a .config
-	echo 'CONFIG_NFSD_V3_ACL=y' | tee -a .config
-	echo 'CONFIG_NFSD_V4=y' | tee -a .config
-	echo 'CONFIG_NFSD_BLOCKLAYOUT=y' | tee -a .config
-	echo 'CONFIG_NFSD_SCSILAYOUT=y' | tee -a .config
-	echo 'CONFIG_NFSD_FLEXFILELAYOUT=y' | tee -a .config
-	echo 'CONFIG_NFSD_V4_SECURITY_LABEL=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NETWORK_FILESYSTEMS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_FS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V2 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V3 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V3_ACL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V4 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_SWAP y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V4_1 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V4_2 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_V4_1_MIGRATION y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_ROOT_NFS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFS_DISABLE_UDP_SUPPORT n true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_V3 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_V3_ACL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_V4 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_BLOCKLAYOUT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_SCSILAYOUT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_FLEXFILELAYOUT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NFSD_V4_SECURITY_LABEL y true true
 
 	echo 'Enable SMB Support'
-	echo 'CONFIG_NETWORK_FILESYSTEMS=y' | tee -a .config
-	echo 'CONFIG_CIFS=m' | tee -a .config
-	echo 'CONFIG_CIFS_ALLOW_INSECURE_LEGACY=y' | tee -a .config
-	echo 'CONFIG_CIFS_WEAK_PW_HASH=y' | tee -a .config
-	echo 'CONFIG_CIFS_UPCALL=y' | tee -a .config
-	echo 'CONFIG_CIFS_XATTR=y' | tee -a .config
-	echo 'CONFIG_CIFS_POSIX=y' | tee -a .config
-	echo 'CONFIG_CIFS_DFS_UPCALL=y' | tee -a .config
-	echo 'CONFIG_CIFS_SMB_DIRECT=y' | tee -a .config
-	echo 'CONFIG_CIFS_FSCACHE=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_NETWORK_FILESYSTEMS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS m true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_ALLOW_INSECURE_LEGACY y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_WEAK_PW_HASH y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_UPCALL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_XATTR y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_POSIX y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_DFS_UPCALL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_SMB_DIRECT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CIFS_FSCACHE y true true
 
 	echo 'Enable RAID support'
-	echo 'CONFIG_BLK_DEV_MD=y' | tee -a .config
-	echo 'CONFIG_MD_LINEAR=y' | tee -a .config
-	echo 'CONFIG_MD_RAID0=y' | tee -a .config
-	echo 'CONFIG_MD_RAID1=y' | tee -a .config
-	echo 'CONFIG_MD_RAID10=y' | tee -a .config
-	echo 'CONFIG_MD_RAID456=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BLK_DEV_MD y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MD_LINEAR y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MD_RAID0 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MD_RAID1 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MD_RAID10 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MD_RAID456 y true true
 
 	echo 'Enable USB support'
-	echo 'CONFIG_USB=y' | tee -a .config
-	echo 'CONFIG_USB_PCI=y' | tee -a .config
-	echo 'CONFIG_USB_SUPPORT=y' | tee -a .config
-	echo 'CONFIG_USB_XHCI_HCD=y' | tee -a .config
-	echo 'CONFIG_USB_XHCI_PCI=y' | tee -a .config
-	echo 'CONFIG_USB_XHCI_PCI_RENESAS=y' | tee -a .config
-	echo 'CONFIG_USB_EHCI_HCD=y' | tee -a .config
-	echo 'CONFIG_USB_OHCI_HCD=y' | tee -a .config
-	echo 'CONFIG_USB_OHCI_HCD_PCI=y' | tee -a .config
-	echo 'CONFIG_USB_UHCI_HCD=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_PCI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_SUPPORT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_XHCI_HCD y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_XHCI_PCI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_XHCI_PCI_RENESAS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_EHCI_HCD y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_OHCI_HCD y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_OHCI_HCD_PCI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_UHCI_HCD y true true
 
 	echo 'Enable USB Storage Support'
-	echo 'CONFIG_USB_STORAGE=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_ALAUDA=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_CYPRESS_ATACB=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_DATAFAB=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_ENE_UB6250=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_FREECOM=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_ISD200=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_JUMPSHOT=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_KARMA=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_ONETOUCH=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_REALTEK=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_SDDR09=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_SDDR55=y' | tee -a .config
-	echo 'CONFIG_USB_STORAGE_USBAT=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_ALAUDA y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_CYPRESS_ATACB y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_DATAFAB y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_ENE_UB6250 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_FREECOM y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_ISD200 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_JUMPSHOT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_KARMA y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_ONETOUCH y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_REALTEK y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_SDDR09 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_SDDR55 y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_STORAGE_USBAT y true true
 
 	echo 'Enable VirtIO support'
-	echo 'CONFIG_REMOTEPROC=y' | tee -a .config
-	echo 'CONFIG_VIRTIO_PCI=y' | tee -a .config
-	echo 'CONFIG_VIRTIO_BLK=y' | tee -a .config
-	echo 'CONFIG_SCSI_VIRTIO=y' | tee -a .config
-	echo 'CONFIG_VIRTIO_NET=y' | tee -a .config
-	echo 'CONFIG_HW_RANDOM_VIRTIO=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_REMOTEPROC y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_VIRTIO_PCI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_VIRTIO_BLK y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_VIRTIO y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_VIRTIO_NET y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_HW_RANDOM_VIRTIO y true true
 
 	echo 'Enable audio over HDMI support'
-	echo 'CONFIG_SND_HDA_INTEL=y' | tee -a .config
-	echo 'CONFIG_SND_HDA_CODEC_HDMI=y' | tee -a .config
-	echo 'CONFIG_SND_HDA_GENERIC=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SND_HDA_INTEL y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SND_HDA_CODEC_HDMI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SND_HDA_GENERIC y true true
 
 	echo 'Enable VMware support'
-	echo 'CONFIG_VMWARE_PVSCSI=y' | tee -a .config
-	echo 'CONFIG_SCSI_MPT2SAS=y' | tee -a .config
-	echo 'CONFIG_SCSI_MPT3SAS=y' | tee -a .config
-	echo 'CONFIG_VMWARE_VMCI_VSOCKETS=m' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_VMWARE_PVSCSI y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_MPT2SAS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SCSI_MPT3SAS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_VMWARE_VMCI_VSOCKETS m true true
 
 	echo 'A preallocated buffer-size of 2048 (kB) or higher is recommended for the HD-audio driver'
 	echo 'CONFIG_SND_HDA_PREALLOC_SIZE=2048' | tee -a .config
 
 	echo 'Power management and ACPI options > CPU Frequency scaling > Default CPUFreq governor (performance)'
-	echo 'CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE y true true
 
 	echo 'Processor type and features > Preemption Model (Preemptible Kernel (Low-Latency Desktop))'
-	echo 'CONFIG_PREEMPT=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_PREEMPT y true true
 
 	echo 'Enable Control Group support'
-	echo 'CONFIG_CGROUPS=y' | tee -a .config
-	echo 'CONFIG_CGROUP_FREEZER=y' | tee -a .config
-	echo 'CONFIG_CGROUP_PIDS=y' | tee -a .config
-	echo 'CONFIG_CGROUP_DEVICE=y' | tee -a .config
-	echo 'CONFIG_CPUSETS=y' | tee -a .config
-	echo 'CONFIG_CGROUP_CPUACCT=y' | tee -a .config
-	echo 'CONFIG_MEMCG=y' | tee -a .config
-	echo 'CONFIG_MEMCG_SWAP=y' | tee -a .config
-	echo 'CONFIG_MEMCG_KMEM=y' | tee -a .config
-	echo 'CONFIG_CGROUP_HUGETLB=y' | tee -a .config
-	echo 'CONFIG_CGROUP_PERF=y' | tee -a .config
-	echo 'CONFIG_CGROUP_SCHED=y' | tee -a .config
-	echo 'CONFIG_FAIR_GROUP_SCHED=y' | tee -a .config
-	echo 'CONFIG_CFS_BANDWIDTH=y' | tee -a .config
-	echo 'CONFIG_BLK_CGROUP=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUPS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_FREEZER y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_PIDS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_DEVICE y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CPUSETS y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_CPUACCT y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MEMCG y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MEMCG_SWAP y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_MEMCG_KMEM y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_HUGETLB y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_PERF y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CGROUP_SCHED y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_FAIR_GROUP_SCHED y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CFS_BANDWIDTH y true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_BLK_CGROUP y true true
 
 	echo 'dev-libs/ell and sys-apps/keyutils require CONFIG_KEY_DH_OPERATIONS'
-	echo 'CONFIG_KEY_DH_OPERATIONS=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_KEY_DH_OPERATIONS y true true
 	echo 'media-libs/mesa requires CONFIG_CHECKPOINT_RESTORE'
-	echo 'CONFIG_CHECKPOINT_RESTORE=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_CHECKPOINT_RESTORE y true true
 	echo 'www-client/google-chrome requires CONFIG_USER_NS'
-	echo 'CONFIG_USER_NS=y' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USER_NS y true true
 
 	echo 'Clear system-wide ring of truted keys and revocation certificates'
 	echo 'CONFIG_SYSTEM_TRUSTED_KEYS=""';
@@ -523,21 +526,16 @@ function kernelseeds_set_common
 	sed -i -r 's/^CONFIG_SYSTEM_REVOCATION_KEYS=".*"$/CONFIG_SYSTEM_REVOCATION_KEYS=""/' .config
 
 	echo 'Disable SELinux'
-	echo 'CONFIG_SECURITY_SELINUX=n' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_SECURITY_SELINUX n true true
 	echo 'Disable USB Attached SCSI since it is broken for seagate drives'
-	echo 'CONFIG_USB_UAS=n' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_USB_UAS n true true
 	echo 'Disable debug info because it requires pahole at kernel compile time'
-	echo 'CONFIG_DEBUG_INFO=n' | tee -a .config
-	echo 'CONFIG_DEBUG_INFO_BTF=n' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DEBUG_INFO n true true
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DEBUG_INFO_BTF n true true
 	echo 'Disable "Stack utilization instrumentation" because it floods "used greatest stack depth" to system log'
-	echo 'CONFIG_DEBUG_STACK_USAGE=n' | tee -a .config
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_DEBUG_STACK_USAGE n true true
 	echo 'Disable "Event debugging" because it is autoloaded and floods the system log'
-	echo 'CONFIG_INPUT_EVBUG=n' | tee -a .config
-	
-	kernelseeds_quiet make olddefconfig
-	
-	popd > /dev/null
-	cp -f "$TMP/kernelsource/.config" "$KERNEL_SOURCE_PATH/.config"
+	kernelseeds_set_option "$KERNEL_SOURCE_PATH" CONFIG_INPUT_EVBUG n true true
 }
 
 # Set options for Raspberry Pi 2 support
